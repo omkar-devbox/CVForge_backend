@@ -1,0 +1,30 @@
+# 1. Build System (Tells Python how to package the project)
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+
+# 2. Project Metadata and Requirements
+[project]
+name = "CVForge_backend"
+version = "0.1.0"
+description = "CVForge backend"
+requires-python = ">=3.8"
+
+# Main packages required for your project
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.22.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "sqlalchemy>=2.0",
+    "alembic>=1.11.0",
+    "psycopg[binary,pool]>=3.1.0",
+    "python-multipart>=0.0.6",
+    "pandas",
+    "unstructured[all-docs]",
+    "pytest>=7.0.0"
+]
