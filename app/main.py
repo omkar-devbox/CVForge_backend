@@ -1,19 +1,30 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, close_db_connection, engine, init_db
 from app.core.exceptions import AppException, app_exception_handler
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.tenant import TenantMiddleware
 
+logger = logging.getLogger("cvforge.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB tables automatically on startup (if not using Alembic)
-    Base.metadata.create_all(bind=engine)
+    # Initialize DB tables automatically on startup if database is available
+    try:
+        init_db()
+    except Exception as exc:
+        logger.warning(f"Database auto-initialization skipped or deferred: {exc}")
     yield
+    # Graceful connection shutdown
+    try:
+        close_db_connection()
+    except Exception as exc:
+        logger.warning(f"Error during database shutdown: {exc}")
 
 
 app = FastAPI(

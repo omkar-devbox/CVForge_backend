@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class StudentCreate(BaseModel):
@@ -23,6 +23,8 @@ class StudentUpdate(BaseModel):
 
 
 class StudentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     first_name: str
     last_name: str
@@ -33,6 +35,3 @@ class StudentResponse(BaseModel):
     tenant_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True

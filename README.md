@@ -91,7 +91,23 @@ Apply migrations:
 alembic upgrade head
 ```
 
-### 5. Running Tests
+### 5. Running Resume Extraction & Embedding Pipeline
+
+Extract structured candidate profiles, images, and embeddings from resumes:
+```bash
+# Process all resumes in Data for AI/resumes
+python run_resume_extractor.py
+
+# Process a single resume file
+python run_resume_extractor.py --file "../Data for AI/resumes/ALOK KUMAR.docx"
+```
+
+Features:
+- **Candidate Profiling**: Name, Contact No, Email, Links (`github`, `linkedin`, `portfolio`), Skills, Education, Experience.
+- **Image Saving**: Extracts profile pictures/media into `Extracted data/images/<candidate_name>/`.
+- **Embeddings**: Computes 768-dimensional normalized dense vectors using `embeddinggemma-onnx-embeddinggemma-300m-v1`.
+
+### 6. Running Tests
 
 Run full test suite with pytest:
 ```bash

@@ -1,0 +1,68 @@
+# =============================================================================
+# CVForge Backend Environment Configuration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Server / Application Configuration
+# -----------------------------------------------------------------------------
+ENVIRONMENT=development
+PROJECT_NAME="CVForge Backend"
+HOST=0.0.0.0
+PORT=8000
+BASE_URL="http://localhost:8000"
+API_V1_STR="/api/v1"
+CORS_ORIGIN=["http://localhost:3000","http://localhost:8000"]
+
+# -----------------------------------------------------------------------------
+# Security / JWT & Encryption Configuration
+# -----------------------------------------------------------------------------
+JWT_ACCESS_SECRET="your-super-secret-jwt-access-key-here-min-32-chars"
+JWT_REFRESH_SECRET="your-super-secret-jwt-refresh-key-here-min-32-chars"
+JWT_ACCESS_EXPIRATION=60
+JWT_REFRESH_EXPIRATION=10080
+ENCRYPTION_KEY="your-32-character-encryption-key"
+INTERNAL_SERVICE_SECRET="optional-internal-service-secret-token"
+ALGORITHM="HS256"
+
+# -----------------------------------------------------------------------------
+# Redis & Rate Limiting (Throttling) Configuration
+# -----------------------------------------------------------------------------
+REDIS_URL="redis://localhost:6379/0"
+THROTTLER_TTL=60
+THROTTLER_LIMIT=100
+
+# -----------------------------------------------------------------------------
+# Email (SMTP) Configuration
+# -----------------------------------------------------------------------------
+SMTP_HOST="smtp.mailtrap.io"
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER="your-smtp-username"
+SMTP_PASS="your-smtp-password"
+SMTP_FROM_EMAIL="noreply@cvforge.com"
+SMTP_FROM_NAME="CVForge"
+
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
+# Direct connection URL (overrides separate DB parameters if set)
+# DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/cvforge"
+# DATABASE_URL="sqlite:///./cvforge.db"
+
+# Or configure via individual connection parameters:
+DB_DIALECT=postgresql+psycopg
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=cvforge
+DB_CONNECT_TIMEOUT=10
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_POOL_RECYCLE=1800
+DB_ECHO=false
+
+
+
+#File Path
+FilePath = ./Documents
