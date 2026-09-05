@@ -1,0 +1,111 @@
+# ----------------------------------------
+# Imports
+# ----------------------------------------
+
+from typing import List
+
+
+# ----------------------------------------
+# Known Developer and Domain Tools
+# ----------------------------------------
+
+KNOWN_TOOLS: List[str] = [
+    "Git",
+    "GitHub",
+    "GitLab",
+    "Bitbucket",
+    "SVN",
+    "VS Code",
+    "Visual Studio",
+    "PyCharm",
+    "IntelliJ IDEA",
+    "IntelliJ",
+    "Eclipse",
+    "Sublime Text",
+    "Jupyter Notebook",
+    "Jupyter",
+    "Vim",
+    "Android Studio",
+    "Xcode",
+    "Postman",
+    "Swagger",
+    "Insomnia",
+    "Selenium",
+    "JUnit",
+    "PyTest",
+    "Cypress",
+    "JMeter",
+    "Docker",
+    "Kubernetes",
+    "Jenkins",
+    "GitLab CI",
+    "GitHub Actions",
+    "Terraform",
+    "Ansible",
+    "Helm",
+    "Vagrant",
+    "ArgoCD",
+    "Maven",
+    "Gradle",
+    "Webpack",
+    "Vite",
+    "npm",
+    "yarn",
+    "AWS",
+    "Microsoft Azure",
+    "Azure",
+    "GCP",
+    "Google Cloud",
+    "Heroku",
+    "Netlify",
+    "Vercel",
+    "Prometheus",
+    "Grafana",
+    "Splunk",
+    "ELK",
+    "Logstash",
+    "Kibana",
+    "Datadog",
+    "CloudWatch",
+    "Jira",
+    "Confluence",
+    "Trello",
+    "Asana",
+    "Slack",
+    "Notion",
+    "Figma",
+    "Adobe XD",
+    "Photoshop",
+    "Illustrator",
+    "Canva",
+    "AutoCAD",
+    "SolidWorks",
+    "CATIA",
+    "ANSYS",
+    "Simulink",
+    "MATLAB",
+    "LabVIEW",
+    "Altium",
+    "Tableau",
+    "Power BI",
+    "Excel",
+    "MS Excel",
+    "Snowflake",
+    "Databricks",
+    "DBeaver",
+    "pgAdmin",
+    "MySQL Workbench",
+    "MongoDB Compass",
+    "Linux",
+    "Bash",
+    "PowerShell",
+]
+
+
+# ----------------------------------------
+# Public Exports
+# ----------------------------------------
+
+__all__ = [
+    "KNOWN_TOOLS",
+]

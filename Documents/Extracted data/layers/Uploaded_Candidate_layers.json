@@ -1,0 +1,94 @@
+{
+  "pages": [
+    {
+      "page": 1,
+      "size": [612, 792],
+      "layers": [
+        {
+          "type": "text",
+          "text": "Uploaded Candidate",
+          "box": [90.1, 72.5, 219.3, 31.7],
+          "font": ["Carlito", 26],
+          "color": "#17365d"
+        },
+        {
+          "type": "text",
+          "text": "Email: upload.cand@example.com | Phone: 9876543215",
+          "box": [90.1, 123.8, 265, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "LinkedIn: https://www.linkedin.com/in/uploadedcandidate",
+          "box": [90.1, 148.6, 283.8, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "GitHub: https://github.com/uploadedcandidate",
+          "box": [90.1, 173.3, 224.2, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "Summary",
+          "box": [90.1, 212.4, 55.3, 17.1],
+          "font": ["Carlito", 14, "bold"],
+          "color": "#365f91"
+        },
+        {
+          "type": "text",
+          "text": "Uploaded Candidate is a software engineer with expertise in modern technologies.",
+          "box": [90.1, 231.8, 385.2, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "Skills",
+          "box": [90.1, 270.9, 29.2, 17.1],
+          "font": ["Carlito", 14, "bold"],
+          "color": "#365f91"
+        },
+        {
+          "type": "text",
+          "text": "Python, FastAPI",
+          "box": [90.1, 290.2, 74.6, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "Project",
+          "box": [95.5, 315, 33.4, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "Technologies",
+          "box": [311.5, 315, 62.1, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "CVForge",
+          "box": [95.5, 339.8, 39.9, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        },
+        {
+          "type": "text",
+          "text": "Python, FastAPI",
+          "box": [311.5, 339.8, 74.6, 12.9],
+          "font": ["Caladea", 11],
+          "color": "#000"
+        }
+      ]
+    }
+  ]
+}

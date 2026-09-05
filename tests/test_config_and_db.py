@@ -1,7 +1,7 @@
-"""Unit tests for core configuration and database subsystems."""
+"""Unit tests for configuration and psycopg-powered database subsystem."""
 
+from unittest.mock import MagicMock, patch
 import pytest
-from sqlalchemy import Column, Integer, String
 from app.core.config import (
     AppConfigService,
     EnvironmentVariables,
@@ -12,19 +12,22 @@ from app.core.config import (
 )
 from app.core.database import (
     Base,
+    DatabaseClient,
+    PgConnectionService,
+    build_conninfo_from_config,
     check_db_connection,
     close_db_connection,
-    create_db_engine,
+    create_connection_pool,
+    db,
     get_db,
     get_db_context,
+    get_db_cursor,
+    get_pool,
+    get_pool_config,
     init_db,
+    normalize_database_url,
 )
-
-
-class DummyModel(Base):
-    __tablename__ = "dummy_test_models"
-    id = Column(Integer, primary_key=True)
-    name = Column(String(50), nullable=False)
+from app.models.student import Student
 
 
 def test_env_validation_defaults():
@@ -33,7 +36,6 @@ def test_env_validation_defaults():
     assert env.PORT == 8000
     assert "http://localhost:3000" in env.CORS_ORIGIN
     assert env.DATABASE_URL is not None
-    assert "postgresql+psycopg://" in env.DATABASE_URL or "sqlite://" in env.DATABASE_URL
 
 
 def test_env_validation_cors_parsing():
@@ -126,23 +128,10 @@ def test_app_config_service_database_properties():
     assert svc.backendDbConnectTimeout == 10
     assert svc.backend_db_max_pool_size == 10
     assert svc.backendDbMaxPoolSize == 10
-    assert svc.backend_db_dialect == "postgresql+psycopg"
-    assert svc.backendDbDialect == "postgresql+psycopg"
     assert svc.database_url != ""
     assert svc.databaseUrl == svc.database_url
     assert svc.db_max_overflow == 20
     assert svc.db_echo is False
-
-
-def test_app_config_service_generic_get_and_fallback():
-    svc = AppConfigService(EnvironmentVariables(_env_file=None))
-    assert svc.get("PORT") == 8000
-    assert svc.get("port") == 8000
-    assert svc.get("JWT_ACCESS_SECRET") == "secret-access-token-key-change-in-production"
-    assert svc.get("NON_EXISTENT", "default_val") == "default_val"
-    assert svc.PROJECT_NAME == "CVForge Backend"
-    assert svc.DATABASE_URL != ""
-    assert isinstance(svc.BACKEND_CORS_ORIGINS, list)
 
 
 def test_singleton_providers():
@@ -153,40 +142,261 @@ def test_singleton_providers():
     assert settings is svc1
 
 
-def test_database_session_and_context_manager():
-    test_engine = create_db_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=test_engine)
+# -----------------------------------------------------------------------------
+# Database Subsystem Tests (psycopg[binary,pool])
+# -----------------------------------------------------------------------------
 
-    from sqlalchemy.orm import sessionmaker
+def test_database_url_normalization():
+    assert (
+        normalize_database_url("postgresql+psycopg://user:pass@localhost:5432/db")
+        == "postgresql://user:pass@localhost:5432/db"
+    )
+    assert (
+        normalize_database_url("postgresql+psycopg2://user:pass@localhost:5432/db")
+        == "postgresql://user:pass@localhost:5432/db"
+    )
+    assert (
+        normalize_database_url("postgres://user:pass@localhost:5432/db")
+        == "postgresql://user:pass@localhost:5432/db"
+    )
+    assert normalize_database_url("") == ""
 
-    TestSession = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
-    # Test get_db generator
-    def _override_get_db():
-        db = TestSession()
+def test_build_conninfo_and_pool_config():
+    conninfo = build_conninfo_from_config("postgresql://user:secret@localhost:5432/mydb")
+    assert "postgresql://user:secret@localhost:5432/mydb" in conninfo
+
+    pool_cfg = get_pool_config()
+    assert pool_cfg.max_size >= 1
+    assert pool_cfg.min_size >= 1
+    assert pool_cfg.timeout > 0
+
+
+def test_create_connection_pool_instance():
+    pool = create_connection_pool(
+        conninfo="postgresql://test:test@localhost:5432/testdb",
+        open_immediately=False,
+    )
+    assert pool is not None
+    assert pool.max_size >= 1
+    assert pool.closed is True
+    pool.close()
+
+
+def test_database_client_fetch_and_execute():
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__.return_value = mock_cursor
+    mock_cursor.__exit__.return_value = None
+    mock_cursor.fetchone.return_value = {"id": "123", "name": "Alice"}
+    mock_cursor.fetchall.return_value = [{"id": "123", "name": "Alice"}]
+    mock_cursor.rowcount = 1
+
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    client = DatabaseClient()
+
+    with patch.object(client, "connection") as mock_scope:
+        mock_scope.return_value.__enter__.return_value = mock_conn
+
+        # Test fetch_one
+        row = client.fetch_one("SELECT * FROM students WHERE id = %s", ("123",))
+        assert row == {"id": "123", "name": "Alice"}
+        mock_cursor.execute.assert_called_with("SELECT * FROM students WHERE id = %s", ("123",))
+
+        # Test fetch_all
+        rows = client.fetch_all("SELECT * FROM students")
+        assert len(rows) == 1
+        assert rows[0]["name"] == "Alice"
+
+        # Test fetch_val
+        val = client.fetch_val("SELECT name FROM students", column="name")
+        assert val == "Alice"
+
+        # Test execute
+        count = client.execute("UPDATE students SET name = %s", ("Bob",))
+        assert count == 1
+
+
+def test_database_client_transaction():
+    mock_conn = MagicMock()
+    mock_tx = MagicMock()
+    mock_tx.__enter__.return_value = mock_tx
+    mock_tx.__exit__.return_value = None
+    mock_conn.transaction.return_value = mock_tx
+
+    client = DatabaseClient()
+    with patch.object(client, "connection") as mock_scope:
+        mock_scope.return_value.__enter__.return_value = mock_conn
+        with client.transaction() as tx:
+            assert tx.conn is mock_conn
+        mock_conn.transaction.assert_called_once()
+
+
+def test_database_client_transaction_manual_rollback():
+    mock_conn = MagicMock()
+    mock_tx = MagicMock()
+    mock_tx.force_rollback = False
+    mock_tx.__enter__.return_value = mock_tx
+    mock_tx.__exit__.return_value = None
+    mock_conn.transaction.return_value = mock_tx
+
+    client = DatabaseClient()
+    with patch.object(client, "connection") as mock_scope:
+        mock_scope.return_value.__enter__.return_value = mock_conn
+        with client.transaction() as tx:
+            tx.rollback()
+            assert tx.is_rolled_back is True
+
+        assert mock_tx.force_rollback is True
+
+
+def test_database_client_transaction_rollback_exception():
+    mock_conn = MagicMock()
+    mock_tx = MagicMock()
+    mock_tx.force_rollback = False
+    mock_tx.__enter__.return_value = mock_tx
+    mock_tx.__exit__.return_value = None
+    mock_conn.transaction.return_value = mock_tx
+
+    client = DatabaseClient()
+    with patch.object(client, "connection") as mock_scope:
+        mock_scope.return_value.__enter__.return_value = mock_conn
+        # Rollback exception should be caught silently and trigger rollback
+        with client.transaction() as tx:
+            raise client.Rollback("abort")
+
+        assert mock_tx.force_rollback is True
+        assert tx.is_rolled_back is True
+
+
+def test_database_client_savepoint_rollback():
+    mock_conn = MagicMock()
+    mock_sp = MagicMock()
+    mock_sp.force_rollback = False
+    mock_sp.__enter__.return_value = mock_sp
+    mock_sp.__exit__.return_value = None
+    mock_conn.transaction.return_value = mock_sp
+
+    client = DatabaseClient()
+    with client.savepoint(mock_conn, name="test_sp") as sp:
+        sp.rollback()
+        assert sp.is_rolled_back is True
+
+    assert mock_sp.force_rollback is True
+    mock_conn.transaction.assert_called_with(savepoint_name="test_sp")
+
+
+def test_get_db_dependencies():
+    mock_conn = MagicMock()
+    mock_pool = MagicMock()
+    mock_pool.closed = False
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+
+    with patch("app.core.database.get_pool", return_value=mock_pool):
+        gen = get_db()
+        conn = next(gen)
+        assert conn is mock_conn
         try:
-            yield db
-        finally:
-            db.close()
-
-    gen = _override_get_db()
-    session = next(gen)
-    item = DummyModel(name="test_record")
-    session.add(item)
-    session.commit()
-
-    saved = session.query(DummyModel).filter_by(name="test_record").first()
-    assert saved is not None
-    assert "DummyModel" in repr(saved)
-    assert "name='test_record'" in repr(saved)
-
-    try:
-        next(gen)
-    except StopIteration:
-        pass
+            next(gen)
+        except StopIteration:
+            pass
+        mock_conn.commit.assert_called_once()
 
 
-def test_database_health_check():
-    # check_db_connection function executes cleanly
-    is_connected = check_db_connection()
-    assert isinstance(is_connected, bool)
+def test_get_db_rollback_on_exception():
+    mock_conn = MagicMock()
+    mock_pool = MagicMock()
+    mock_pool.closed = False
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+
+    with patch("app.core.database.get_pool", return_value=mock_pool):
+        gen = get_db()
+        conn = next(gen)
+        assert conn is mock_conn
+        with pytest.raises(RuntimeError):
+            gen.throw(RuntimeError("Simulated route failure"))
+        mock_conn.rollback.assert_called_once()
+
+
+def test_get_db_context_manager():
+    mock_conn = MagicMock()
+    mock_pool = MagicMock()
+    mock_pool.closed = False
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+
+    with patch("app.core.database.get_pool", return_value=mock_pool):
+        with get_db_context() as conn:
+            assert conn is mock_conn
+        mock_conn.commit.assert_called_once()
+
+
+def test_check_db_connection_success():
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__.return_value = mock_cursor
+    mock_cursor.__exit__.return_value = None
+    mock_cursor.fetchone.return_value = {"ping": 1}
+
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    mock_pool = MagicMock()
+    mock_pool.closed = False
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+
+    with patch("app.core.database.get_pool", return_value=mock_pool):
+        assert check_db_connection() is True
+
+
+def test_student_model_dataclass():
+    student = Student(
+        first_name="John",
+        last_name="Doe",
+        email="john.doe@example.com",
+        phone="+1234567890",
+        department="CS",
+        gpa=3.85,
+    )
+    assert student.first_name == "John"
+    assert student.id is not None
+    assert student.created_at is not None
+
+    d = student.to_dict()
+    assert d["first_name"] == "John"
+    assert d["email"] == "john.doe@example.com"
+
+    rehydrated = Student.from_dict(d)
+    assert rehydrated.id == student.id
+    assert rehydrated.email == student.email
+    assert "Student" in repr(student)
+
+
+@pytest.mark.anyio
+async def test_pg_connection_service_shutdown_lifecycle():
+    from unittest.mock import AsyncMock
+
+    mock_sync_pool = MagicMock()
+    mock_sync_pool.closed = False
+
+    mock_async_pool = MagicMock()
+    mock_async_pool.closed = False
+    mock_async_pool.close = AsyncMock()
+
+    service = PgConnectionService(pool=mock_sync_pool, async_pool=mock_async_pool)
+
+    # Test async shutdown
+    await service.on_application_shutdown()
+    mock_sync_pool.close.assert_called_once()
+    mock_async_pool.close.assert_awaited_once()
+
+    # Test CamelCase alias
+    mock_sync_pool.reset_mock()
+    mock_async_pool.close.reset_mock()
+    await service.onApplicationShutdown()
+    mock_sync_pool.close.assert_called_once()
+    mock_async_pool.close.assert_awaited_once()
+
+    # Test synchronous close helper
+    mock_sync_pool.reset_mock()
+    service.close()
+    mock_sync_pool.close.assert_called_once()

@@ -1,31 +1,106 @@
 # 1. Build System (Tells Python how to package the project)
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools]
+py-modules = ["run_resume_extractor"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json"]
 
 
 # 2. Project Metadata and Requirements
 [project]
 name = "CVForge_backend"
 version = "0.1.0"
-description = "CVForge backend"
-requires-python = ">=3.8"
+description = "CVForge backend - AI-powered resume and CV parsing and manifest service"
+readme = "README.md"
+requires-python = ">=3.10"
 
-# Main packages required for your project
+# Main packages required for the project
 dependencies = [
+    # Web Framework & API
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.22.0",
+    "python-multipart>=0.0.6",
+    "email-validator>=2.0.0",
+
+    # Configuration & Validation
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    "sqlalchemy>=2.0",
-    "alembic>=1.11.0",
+    "python-dotenv>=1.0.0",
+
+    # Database Client & Connection Pool
     "psycopg[binary,pool]>=3.1.0",
-    "python-multipart>=0.0.6",
-    "pandas",
-    "unstructured[all-docs]",
-    "email-validator>=2.0.0",
-    "pytest>=7.0.0"
+
+    # Document Extraction & Parsing
+    "pymupdf>=1.24.0",
+    "pdfplumber>=0.11.0",
+    "python-docx>=1.1.0",
+    "olefile>=0.46",
+    "unstructured[all-docs]>=0.10.0",
+    "beautifulsoup4>=4.12.0",
+
+    # Text Processing & Data Science
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "pillow>=10.0.0",
+    "rapidfuzz>=3.0.0",
+    "dateparser>=1.2.0",
+
+    # AI & ML Pipeline
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "tokenizers>=0.15.0",
+    "onnxruntime>=1.16.0",
+    "accelerate>=0.28.0",
+    "safetensors>=0.4.0",
 ]
+
+# Optional / Extra Dependencies
+[project.optional-dependencies]
+ocr = [
+    "paddleocr>=2.7.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "httpx>=0.24.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "httpx>=0.24.0",
+    "ruff>=0.4.0",
+]
+all = [
+    "paddleocr>=2.7.0",
+    "pytest>=7.0.0",
+    "httpx>=0.24.0",
+    "ruff>=0.4.0",
+]
+
+# Command Line Entrypoints
+[project.scripts]
+cvforge-extract = "run_resume_extractor:main"
+
+# 3. Tool Configurations
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["E501", "B008"]
+

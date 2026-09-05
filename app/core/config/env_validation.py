@@ -131,6 +131,19 @@ class EnvironmentVariables(BaseSettings):
         validation_alias=AliasChoices("FILE_PATH", "FilePath", "file_path", "filepath", "FILEPATH"),
         description="Directory path containing input documents (pdf, doc, docx)",
     )
+    FILE_PATH_UPLOAD: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "FILE_PATH_UPLOAD",
+            "FilePathUpload",
+            "file_path_upload",
+            "filepath_upload",
+            "FILEPATHUPLOAD",
+            "UPLOAD_PATH",
+            "UPLOAD_DIR",
+        ),
+        description="Directory path for uploaded documents (defaults to subfolder 'Upload' inside FILE_PATH if not set)",
+    )
     EXTRACTED_DATA_FOLDER_NAME: str = Field(
         default="Extracted data",
         validation_alias=AliasChoices(
@@ -140,6 +153,20 @@ class EnvironmentVariables(BaseSettings):
             "EXTRACTED_DATA_DIR",
         ),
         description="Subfolder name for extracted JSON files",
+    )
+
+    # -------------------------------------------------------------------------
+    # Offline Gemma-3 Local LLM Extraction Configuration
+    # -------------------------------------------------------------------------
+    GEMMA_MODEL_PATH: str = Field(
+        default="/home/omkar/Documents/System Mech/gemma-3-270m-it-ONNX",
+        validation_alias=AliasChoices("GEMMA_MODEL_PATH", "gemma_model_path"),
+        description="Local directory containing offline Gemma-3-270m ONNX/PyTorch model",
+    )
+    ENABLE_GEMMA_EXTRACTION: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ENABLE_GEMMA_EXTRACTION", "enable_gemma_extraction", "ENABLE_LLM_EXTRACTION"),
+        description="Enable offline Gemma-3-270m extraction when model directory exists",
     )
 
     # -------------------------------------------------------------------------
@@ -175,12 +202,16 @@ class EnvironmentVariables(BaseSettings):
 
         # Build computed DATABASE_URL if not directly configured
         if not self.DATABASE_URL:
+            from urllib.parse import quote_plus
+
             dialect = self.DB_DIALECT.lower()
             if dialect.startswith("sqlite"):
                 self.DATABASE_URL = f"sqlite:///./{self.DB_NAME}.db"
             else:
+                encoded_user = quote_plus(str(self.DB_USER)) if self.DB_USER else ""
+                encoded_password = quote_plus(str(self.DB_PASSWORD)) if self.DB_PASSWORD else ""
                 self.DATABASE_URL = (
-                    f"{self.DB_DIALECT}://{self.DB_USER}:{self.DB_PASSWORD}"
+                    f"{self.DB_DIALECT}://{encoded_user}:{encoded_password}"
                     f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
                 )
 

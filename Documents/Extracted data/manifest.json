@@ -1,0 +1,29 @@
+{
+  "source_directory": "/home/omkar/Documents/System Mech/CVForge_backend/Documents",
+  "extracted_data_directory": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Extracted data",
+  "total_files_found": 1,
+  "total_processed": 1,
+  "total_success": 1,
+  "total_failed": 0,
+  "processed_at": "2026-09-05T19:44:55.753268+00:00",
+  "files": [
+    {
+      "file_name": "Uploaded_Candidate.docx",
+      "file_stem": "Uploaded_Candidate",
+      "file_type": ".docx",
+      "status": "success",
+      "json_file_name": "Uploaded_Candidate.json",
+      "json_file_path": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Extracted data/Uploaded_Candidate.json",
+      "candidate_name": "Github Httpsgithub.Comuploadedcandidate",
+      "role": "Uploaded Candidate Is A Software Engineer",
+      "emails": ["upload.cand@example.com"],
+      "phones": ["9876543215"],
+      "images_count": 0,
+      "has_embedding": false,
+      "layers_file_name": "Uploaded_Candidate_layers.json",
+      "layers_file_path": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Extracted data/layers/Uploaded_Candidate_layers.json",
+      "extracted_at": "2026-09-05T19:44:51.566643+00:00",
+      "error_message": null
+    }
+  ]
+}

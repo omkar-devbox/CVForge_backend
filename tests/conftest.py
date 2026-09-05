@@ -1,46 +1,32 @@
 import os
+from unittest.mock import MagicMock
+from fastapi.testclient import TestClient
 import pytest
 
 # Ensure testing configuration before importing application components
 os.environ["ENVIRONMENT"] = "testing"
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["DATABASE_URL"] = "postgresql://postgres:postgres@localhost:5432/cvforge_test"
 
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.main import app
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+@pytest.fixture(scope="function")
+def mock_db():
+    """Mock psycopg connection fixture for API tests."""
+    conn = MagicMock()
+    cursor = MagicMock()
+    cursor.__enter__.return_value = cursor
+    cursor.__exit__.return_value = None
+    conn.cursor.return_value = cursor
+    return conn
 
 
 @pytest.fixture(scope="function")
-def db_session():
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
+def client(mock_db):
+    """FastAPI TestClient with overridden get_db dependency."""
     def _override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
+        yield mock_db
 
     app.dependency_overrides[get_db] = _override_get_db
     with TestClient(app) as test_client:

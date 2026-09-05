@@ -3,6 +3,12 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
+from app.services.file_manifest.schemas import (
+    ExtractedDocument,
+    FileManifestItem,
+    FileManifestSummary,
+)
+
 
 class ProcessManifestRequest(BaseModel):
     """Optional request payload to trigger batch processing."""
@@ -24,9 +30,20 @@ class ManifestStatusResponse(BaseModel):
 
     source_directory: str
     source_directory_exists: bool
+    upload_directory: Optional[str] = None
+    upload_directory_exists: Optional[bool] = None
     extracted_data_directory: str
     extracted_data_directory_exists: bool
     total_source_documents: int
     source_documents: List[str] = Field(default_factory=list)
     total_extracted_json_files: int
     extracted_json_files: List[str] = Field(default_factory=list)
+
+
+__all__ = [
+    "ProcessManifestRequest",
+    "ManifestStatusResponse",
+    "ExtractedDocument",
+    "FileManifestItem",
+    "FileManifestSummary",
+]

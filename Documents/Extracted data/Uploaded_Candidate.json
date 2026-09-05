@@ -1,87 +1,71 @@
 {
   "file_name": "Uploaded_Candidate.docx",
   "file_stem": "Uploaded_Candidate",
-  "file_path": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Uploaded_Candidate.docx",
-  "file_extension": ".docx",
   "file_size_bytes": 36734,
   "file_size_kb": 35.87,
-  "file_sha256": "ceaf214da8e6542eefbb73f6cdeeaa09171cac1121738dce5f0ac06a31d49763",
-  "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "extracted_at": "2026-08-25T19:33:13.569989+00:00",
   "status": "success",
-  "error_message": null,
-  "metadata": {
-    "title": null,
-    "author": "python-docx",
-    "subject": null,
-    "keywords": [],
-    "creator": null,
-    "producer": null,
-    "creation_date": "2013-12-23T23:15:00+00:00",
-    "modification_date": "2013-12-23T23:15:00+00:00",
-    "page_count": 1,
-    "word_count": 41,
-    "character_count": 340
+  "name": "Github Httpsgithub.Comuploadedcandidate",
+  "role": "Uploaded Candidate Is A Software Engineer",
+  "contact_no": ["9876543215"],
+  "email": ["upload.cand@example.com"],
+  "links": {
+    "github": "https://github.com/uploadedcandidate",
+    "linkedin": "https://www.linkedin.com/in/uploadedcandidate",
+    "portfolio": null,
+    "others": []
   },
-  "raw_text": "Uploaded Candidate\n\nEmail: upload.cand@example.com | Phone: 9876543215\n\nLinkedIn: https://www.linkedin.com/in/uploadedcandidate\n\nGitHub: https://github.com/uploadedcandidate\n\nSummary\n\nUploaded Candidate is a software engineer with expertise in modern technologies.\n\nSkills\n\nPython, FastAPI\n\nProject | Technologies\n\nCVForge | Python, FastAPI",
-  "clean_text": "Uploaded Candidate\n\nEmail: upload.cand@example.com | Phone: 9876543215\n\nLinkedIn: https://www.linkedin.com/in/uploadedcandidate\n\nGitHub: https://github.com/uploadedcandidate\n\nSummary\n\nUploaded Candidate is a software engineer with expertise in modern technologies.\n\nSkills\n\nPython, FastAPI\n\nProject | Technologies\n\nCVForge | Python, FastAPI",
-  "paragraphs": [
-    "Uploaded Candidate",
-    "Email: upload.cand@example.com | Phone: 9876543215",
-    "LinkedIn: https://www.linkedin.com/in/uploadedcandidate",
-    "GitHub: https://github.com/uploadedcandidate",
-    "Summary",
-    "Uploaded Candidate is a software engineer with expertise in modern technologies.",
-    "Skills",
-    "Python, FastAPI",
-    "Project | Technologies",
-    "CVForge | Python, FastAPI"
-  ],
-  "pages": [
+  "summary": "Uploaded Candidate is a software engineer with expertise in modern technologies.",
+  "skills": ["Python", "FastAPI"],
+  "education": [],
+  "experience": [],
+  "certifications": [],
+  "projects": [
     {
-      "page_number": 1,
-      "text": "Uploaded Candidate\n\nEmail: upload.cand@example.com | Phone: 9876543215\n\nLinkedIn: https://www.linkedin.com/in/uploadedcandidate\n\nGitHub: https://github.com/uploadedcandidate\n\nSummary\n\nUploaded Candidate is a software engineer with expertise in modern technologies.\n\nSkills\n\nPython, FastAPI\n\nProject | Technologies\n\nCVForge | Python, FastAPI",
-      "word_count": 41
+      "name": "CVForge",
+      "description": null,
+      "technologies": ["Python", "FastAPI"],
+      "duration": null,
+      "url": null,
+      "page": null
     }
   ],
+  "languages": [],
+  "tools": ["GitHub"],
   "tables": [
     {
-      "table_index": 1,
       "rows": [
-        [
-          "Project",
-          "Technologies"
-        ],
-        [
-          "CVForge",
-          "Python, FastAPI"
-        ]
-      ]
+        ["Project", "Technologies"],
+        ["CVForge", "Python, FastAPI"]
+      ],
+      "page": null
     }
   ],
-  "entities": {
-    "candidate_name": "Uploaded Candidate",
-    "emails": [
-      "upload.cand@example.com"
-    ],
-    "phones": [
-      "9876543215"
-    ],
-    "links": [
-      "https://www.linkedin.com/in/uploadedcandidate",
-      "https://github.com/uploadedcandidate"
-    ],
-    "linkedin": "https://www.linkedin.com/in/uploadedcandidate",
-    "github": "https://github.com/uploadedcandidate",
-    "skills": [
-      "python",
-      "fastapi",
-      "github"
-    ],
-    "sections": {
-      "summary": "Uploaded Candidate is a software engineer with expertise in modern technologies.",
-      "skills": "Python, FastAPI\nProject | Technologies\nCVForge | Python, FastAPI"
-    }
+  "images": [],
+  "extracted_at": "2026-09-05T19:44:51.566643+00:00",
+  "error_message": null,
+  "json_output_path": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Extracted data/Uploaded_Candidate.json",
+  "ats_score": {
+    "overall_score": 45,
+    "grade": "C (Needs Optimization for ATS)",
+    "contact_score": 15,
+    "completeness_score": 10,
+    "skills_score": 10,
+    "experience_score": 0,
+    "formatting_score": 10,
+    "strengths": ["Professional email address detected.", "Professional online profile links (LinkedIn/GitHub) present.", "Engaging professional summary present.", "Showcases portfolio projects and/or professional certifications."],
+    "suggestions": ["Include a dedicated Technical Skills section.", "Include work experience, internships, or professional projects.", "List your educational degrees and graduating institutions.", "Expand your skills section with relevant frameworks, tools, and libraries."]
   },
-  "json_output_path": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Extracted data/Uploaded_Candidate.json"
+  "sections": {
+    "summary": "Uploaded Candidate is a software engineer with expertise in modern technologies.",
+    "skills": "Python, FastAPI\nProject | Technologies\nCVForge | Python, FastAPI"
+  },
+  "overall_profile": null,
+  "source": null,
+  "location": null,
+  "total_experience": null,
+  "notice_period": null,
+  "expected_ctc": null,
+  "current_ctc": null,
+  "note": null,
+  "file_extension": ".docx"
 }

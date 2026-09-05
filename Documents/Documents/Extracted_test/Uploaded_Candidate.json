@@ -1,0 +1,71 @@
+{
+  "file_name": "Uploaded_Candidate.docx",
+  "file_stem": "Uploaded_Candidate",
+  "file_size_bytes": 36734,
+  "file_size_kb": 35.87,
+  "status": "success",
+  "name": "Uploaded Candidate",
+  "role": "Software Engineer",
+  "contact_no": ["9876543215"],
+  "email": ["upload.cand@example.com"],
+  "links": {
+    "github": "https://github.com/uploadedcandidate",
+    "linkedin": "https://www.linkedin.com/in/uploadedcandidate",
+    "portfolio": null,
+    "others": []
+  },
+  "summary": "Uploaded Candidate is a software engineer with expertise in modern technologies.",
+  "skills": ["Python", "FastAPI", "Github"],
+  "education": [],
+  "experience": [],
+  "certifications": [],
+  "projects": [
+    {
+      "name": "CVForge",
+      "description": null,
+      "technologies": ["Python", "FastAPI"],
+      "duration": null,
+      "url": null,
+      "page": null
+    }
+  ],
+  "languages": [],
+  "tools": ["GitHub"],
+  "tables": [
+    {
+      "rows": [
+        ["Project", "Technologies"],
+        ["CVForge", "Python, FastAPI"]
+      ],
+      "page": null
+    }
+  ],
+  "images": [],
+  "extracted_at": "2026-09-05T19:58:45.138137+00:00",
+  "error_message": null,
+  "json_output_path": "/home/omkar/Documents/System Mech/CVForge_backend/Documents/Documents/Extracted_test/Uploaded_Candidate.json",
+  "ats_score": {
+    "overall_score": 50,
+    "grade": "C (Needs Optimization for ATS)",
+    "contact_score": 15,
+    "completeness_score": 15,
+    "skills_score": 10,
+    "experience_score": 0,
+    "formatting_score": 10,
+    "strengths": ["Professional email address detected.", "Professional online profile links (LinkedIn/GitHub) present.", "Engaging professional summary present.", "Showcases portfolio projects and/or professional certifications."],
+    "suggestions": ["Include work experience, internships, or professional projects.", "List your educational degrees and graduating institutions.", "Expand your skills section with relevant frameworks, tools, and libraries.", "Detail your work history with job titles, companies, and dates."]
+  },
+  "sections": {
+    "summary": "Uploaded Candidate is a software engineer with expertise in modern technologies.",
+    "skills": "Python, FastAPI\nProject | Technologies\nCVForge | Python, FastAPI"
+  },
+  "overall_profile": null,
+  "source": null,
+  "location": null,
+  "total_experience": null,
+  "notice_period": null,
+  "expected_ctc": null,
+  "current_ctc": null,
+  "note": null,
+  "file_extension": ".docx"
+}

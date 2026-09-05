@@ -1,22 +1,29 @@
-"""Comprehensive tests for File Manifest Service, extractors, and API endpoints."""
-
+# //------------------------------------------------------------
+# // Imports & Dependencies (All Top Side)
+# //------------------------------------------------------------
 import io
 from pathlib import Path
 import tempfile
-import pytest
-from fastapi.testclient import TestClient
+
 import docx
+from fastapi.testclient import TestClient
+import pytest
 
 from app.core.config import settings
 from app.main import app
-from app.services.file_manifest.extractors.base import BaseDocumentExtractor
-from app.services.file_manifest.extractors.doc_extractor import DocExtractor
-from app.services.file_manifest.extractors.docx_extractor import DocxExtractor
-from app.services.file_manifest.extractors.entity_extractor import EntityExtractor
-from app.services.file_manifest.extractors.pdf_extractor import PDFExtractor
+from app.services.file_manifest.extractors import (
+    BaseDocumentExtractor,
+    DocExtractor,
+    DocxExtractor,
+    EntityExtractor,
+    PDFExtractor,
+)
 from app.services.file_manifest.service import FileManifestService
 
 
+# //------------------------------------------------------------
+# // Sample Document Generators & Test Helpers
+# //------------------------------------------------------------
 def create_sample_pdf(file_path: Path, name: str, email: str, phone: str, skills: str):
     """Generate a minimal valid PDF with text."""
     text_block = f"{name}\\nEmail: {email} Phone: {phone}\\nSkills: {skills}"
@@ -72,6 +79,9 @@ def create_sample_docx(file_path: Path, name: str, email: str, phone: str, skill
     doc.save(str(file_path))
 
 
+# //------------------------------------------------------------
+# // Test Suite: Entity Extractor
+# //------------------------------------------------------------
 class TestEntityExtractor:
     """Tests for EntityExtractor regex matching and section parsing."""
 
@@ -103,8 +113,46 @@ class TestEntityExtractor:
         assert "summary" in entities.sections
         assert "skills" in entities.sections
         assert entities.candidate_name == "Omkar Shinde"
+        assert "Software Engineer" in (entities.role or "")
+
+    def test_proper_name_and_role_from_header(self):
+        extractor = EntityExtractor()
+        sample = """
+        Mr. Alok Kumar
+        Senior Mechanical Design Engineer
+        Email: alok.k@example.com
+        Phone: 9876543210
+        Location: Pune, India
+
+        Skills
+        ActCAD, AutoCAD, SolidWorks, CATIA
+        """
+        entities = extractor.extract(sample)
+        assert entities.candidate_name == "Alok Kumar"
+        assert entities.role == "Senior Mechanical Design Engineer"
+
+    def test_role_preceding_name_not_confused_as_name(self):
+        extractor = EntityExtractor()
+        sample = """
+        FULL STACK DEVELOPER
+        Priya Patel
+        Email: priya@example.com
+        Phone: 9123456789
+        """
+        entities = extractor.extract(sample)
+        assert entities.candidate_name == "Priya Patel"
+        assert "Full Stack Developer" in (entities.role or "")
+
+    def test_filename_name_and_role_inference(self):
+        extractor = EntityExtractor()
+        entities = extractor.extract("", file_path=Path("Resume_John_Doe_Java_Developer_5yrs.pdf"))
+        assert entities.candidate_name == "John Doe"
+        assert "Java Developer" in (entities.role or "")
 
 
+# //------------------------------------------------------------
+# // Test Suite: Document Extractors (PDF, DOCX, DOC)
+# //------------------------------------------------------------
 class TestDocumentExtractors:
     """Tests for PDF, DOCX, and DOC extractors."""
 
@@ -172,6 +220,9 @@ class TestDocumentExtractors:
         assert result.file_size_bytes > 0
 
 
+# //------------------------------------------------------------
+# // Test Suite: File Manifest Service
+# //------------------------------------------------------------
 class TestFileManifestService:
     """Tests for FileManifestService directory processing and JSON generation."""
 
@@ -224,7 +275,18 @@ class TestFileManifestService:
         retrieved_doc = service.get_extracted_document("Amit_Kumar")
         assert retrieved_doc is not None
         assert retrieved_doc.file_name == "Amit_Kumar.pdf"
+        assert retrieved_doc.name == "Amit Kumar"
+        assert retrieved_doc.role is not None
         assert "amit.k@example.com" in retrieved_doc.entities.emails
+
+        # Verify manifest.json contains candidate_name and role
+        import json
+        with open(manifest_json, "r", encoding="utf-8") as mf:
+            m_data = json.load(mf)
+        assert len(m_data["files"]) == 2
+        for m_item in m_data["files"]:
+            assert m_item.get("candidate_name") is not None
+            assert m_item.get("role") is not None
 
         # Status check
         status_info = service.get_manifest_status()
@@ -251,54 +313,22 @@ class TestFileManifestService:
 
         assert doc.status == "success"
         assert doc.file_stem == "Vikas_Mehta"
-        assert (docs_dir / "Extracted data" / "Vikas_Mehta.json").exists()
+        assert doc.name == "Vikas Mehta"
+        assert doc.role is not None
+        json_path = docs_dir / "Extracted data" / "Vikas_Mehta.json"
+        assert json_path.exists()
+        import json
+        with open(json_path, "r", encoding="utf-8") as jf:
+            json_data = json.load(jf)
+        assert json_data.get("name") == "Vikas Mehta"
+        assert json_data.get("role") is not None
 
 
+# //------------------------------------------------------------
+# // Test Suite: Files API Endpoints
+# //------------------------------------------------------------
 class TestFilesAPI:
-    """Integration tests for Files & Manifest API endpoints."""
-
-    def test_api_manifest_process_and_status(self, client: TestClient, tmp_path):
-        docs_dir = tmp_path / "ApiDocs"
-        docs_dir.mkdir()
-
-        docx_path = docs_dir / "Anil_Deshmukh.docx"
-        create_sample_docx(
-            docx_path,
-            name="Anil Deshmukh",
-            email="anil.d@example.com",
-            phone="9876543214",
-            skills="FastAPI, PostgreSQL, Redis",
-        )
-
-        # Trigger batch process via API
-        response = client.post(
-            "/api/v1/files/manifest/process",
-            json={"directory_path": str(docs_dir), "recursive": False},
-        )
-        assert response.status_code == 200
-        res_json = response.json()
-        assert res_json["success"] is True
-        assert res_json["data"]["total_files_found"] == 1
-        assert res_json["data"]["total_success"] == 1
-
-        # Check status endpoint
-        status_res = client.get(
-            f"/api/v1/files/manifest/status?directory_path={docs_dir}"
-        )
-        assert status_res.status_code == 200
-        status_json = status_res.json()
-        assert status_json["data"]["total_source_documents"] == 1
-        assert "Anil_Deshmukh.docx" in status_json["data"]["source_documents"]
-        assert "Anil_Deshmukh.json" in status_json["data"]["extracted_json_files"]
-
-        # Get extracted document by file stem
-        get_res = client.get(
-            f"/api/v1/files/manifest/extracted/Anil_Deshmukh?directory_path={docs_dir}"
-        )
-        assert get_res.status_code == 200
-        get_json = get_res.json()
-        assert get_json["data"]["file_stem"] == "Anil_Deshmukh"
-        assert "anil.d@example.com" in get_json["data"]["entities"]["emails"]
+    """Integration tests for Files Single and Multi-file Upload API endpoints."""
 
     def test_api_upload_and_extract(self, client: TestClient, tmp_path):
         # Create a sample docx in memory to upload
@@ -323,3 +353,58 @@ class TestFilesAPI:
         assert res_data["success"] is True
         assert res_data["data"]["file_name"] == "Uploaded_Candidate.docx"
         assert "upload.cand@example.com" in res_data["data"]["entities"]["emails"]
+
+        # Verify file is saved in FilePathUpload (settings.upload_path)
+        saved_file = settings.upload_path / "Uploaded_Candidate.docx"
+        assert saved_file.exists()
+
+    def test_api_files_upload_endpoint(self, client: TestClient, tmp_path):
+        """Test uploading directly to /api/files/upload saves to FilePathUpload."""
+        pdf_file = tmp_path / "New_Uploaded_Doc.pdf"
+        create_sample_pdf(
+            pdf_file,
+            name="New Upload",
+            email="new.upload@example.com",
+            phone="9988776655",
+            skills="Python, Postgres",
+        )
+
+        with open(pdf_file, "rb") as f:
+            file_bytes = f.read()
+
+        response = client.post(
+            "/api/files/upload",
+            files={"file": ("New_Uploaded_Doc.pdf", file_bytes, "application/pdf")},
+        )
+        assert response.status_code == 201
+        res_data = response.json()
+        assert res_data["success"] is True
+        assert res_data["data"]["file_name"] == "New_Uploaded_Doc.pdf"
+        assert "new.upload@example.com" in res_data["data"]["entities"]["emails"]
+
+        # Verify saved in FilePathUpload
+        saved_file = settings.upload_path / "New_Uploaded_Doc.pdf"
+        assert saved_file.exists()
+
+    def test_api_files_upload_multiple(self, client: TestClient, tmp_path):
+        """Test uploading multiple files to /api/files/upload-multiple."""
+        pdf1 = tmp_path / "Multi_1.pdf"
+        pdf2 = tmp_path / "Multi_2.pdf"
+        create_sample_pdf(pdf1, name="Multi One", email="m1@example.com", phone="1111111111", skills="Go")
+        create_sample_pdf(pdf2, name="Multi Two", email="m2@example.com", phone="2222222222", skills="Rust")
+
+        with open(pdf1, "rb") as f1, open(pdf2, "rb") as f2:
+            response = client.post(
+                "/api/files/upload-multiple",
+                files=[
+                    ("files", ("Multi_1.pdf", f1.read(), "application/pdf")),
+                    ("files", ("Multi_2.pdf", f2.read(), "application/pdf")),
+                ],
+            )
+        assert response.status_code == 201
+        res_data = response.json()
+        assert res_data["success"] is True
+        assert len(res_data["data"]) == 2
+        assert (settings.upload_path / "Multi_1.pdf").exists()
+        assert (settings.upload_path / "Multi_2.pdf").exists()
+

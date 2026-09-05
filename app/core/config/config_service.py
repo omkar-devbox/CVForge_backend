@@ -340,6 +340,24 @@ class AppConfigService:
         return self.documents_path
 
     @property
+    def file_path_upload(self) -> str:
+        if self._env.FILE_PATH_UPLOAD:
+            return self._env.FILE_PATH_UPLOAD
+        return str(Path(self.file_path) / "Upload")
+
+    @property
+    def filePathUpload(self) -> str:
+        return self.file_path_upload
+
+    @property
+    def upload_path(self) -> Path:
+        return Path(self.file_path_upload).resolve()
+
+    @property
+    def uploadPath(self) -> Path:
+        return self.upload_path
+
+    @property
     def extracted_data_folder_name(self) -> str:
         return self._env.EXTRACTED_DATA_FOLDER_NAME
 

@@ -1,0 +1,468 @@
+import json
+from pathlib import Path
+
+collection = {
+    "info": {
+        "_postman_id": "c92f7344-934e-4fa3-94c0-cb08e3345781",
+        "name": "CVForge Backend API",
+        "description": "Comprehensive Postman Collection for CVForge Backend, Candidates API, Resume Downloads, and File Manifest Services.\n\nIncludes endpoints for:\n1. Candidates API (Listing, Filtering, ATS Search, Profiling, Geometry Layout, Field Correction, Resume File Downloads)\n2. Files & Resume Uploads (Single/Multi-file upload to FilePathUpload, batch manifest processing, status discovery, extracted data retrieval)",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    },
+    "variable": [
+        {"key": "baseUrl", "value": "http://localhost:8000", "type": "string"},
+        {"key": "apiPrefix", "value": "/api/v1", "type": "string"},
+        {"key": "sampleDocumentId", "value": "197", "type": "string"},
+        {
+            "key": "sampleFileName",
+            "value": "Aakrati Agrawal--npu.docx",
+            "type": "string",
+        },
+    ],
+    "item": [
+        {
+            "name": "Candidates API",
+            "description": "Endpoints for discovering, filtering, viewing, updating, and downloading Candidate Resumes.",
+            "item": [
+                {
+                    "name": "List Candidates (With Filters & Pagination)",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates?limit=50&offset=0&status=processed&overall_profile=&min_ats_score=",
+                            "host": ["{{baseUrl}}"],
+                            "path": ["{{apiPrefix}}", "candidates"],
+                            "query": [
+                                {
+                                    "key": "limit",
+                                    "value": "50",
+                                    "description": "Page limit",
+                                },
+                                {
+                                    "key": "offset",
+                                    "value": "0",
+                                    "description": "Page offset",
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "processed",
+                                    "description": "Filter by processing status",
+                                },
+                                {
+                                    "key": "overall_profile",
+                                    "value": "",
+                                    "description": "Filter by domain classification (e.g. Mechanical, Software)",
+                                },
+                                {
+                                    "key": "min_ats_score",
+                                    "value": "",
+                                    "description": "Filter by minimum ATS score (0-100)",
+                                },
+                                {
+                                    "key": "project_name",
+                                    "value": "",
+                                    "description": "Filter by project name",
+                                },
+                            ],
+                        },
+                        "description": "Retrieves paginated candidates with seamless database retrieval and filesystem fallback to Extracted data.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Search Candidates (Query & Skills)",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/search?q=Aakrati&skills=Python,AutoCAD&limit=20&offset=0",
+                            "host": ["{{baseUrl}}"],
+                            "path": ["{{apiPrefix}}", "candidates", "search"],
+                            "query": [
+                                {
+                                    "key": "q",
+                                    "value": "Aakrati",
+                                    "description": "Free-text search across candidate name, summary, and role",
+                                },
+                                {
+                                    "key": "skills",
+                                    "value": "Python,AutoCAD",
+                                    "description": "Comma-separated skill keywords",
+                                },
+                                {"key": "limit", "value": "20"},
+                                {"key": "offset", "value": "0"},
+                            ],
+                        },
+                        "description": "Searches candidates across profile summaries, names, extracted skills, and projects.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Candidate Statistics & Top Skills",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/stats",
+                            "host": ["{{baseUrl}}"],
+                            "path": ["{{apiPrefix}}", "candidates", "stats"],
+                        },
+                        "description": "Returns candidate aggregate metrics, total documents, processed status breakdown, and top extracted skills.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Get Candidate By Document ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}?include_traceability=true",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                            ],
+                            "query": [
+                                {
+                                    "key": "include_traceability",
+                                    "value": "true",
+                                    "description": "Include bounding boxes and block traceability",
+                                }
+                            ],
+                        },
+                        "description": "Retrieves the full structured resume details including contact info, experience, education, certifications, and skills.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Download Candidate Resume (by Document ID)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/download",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "download",
+                            ],
+                        },
+                        "description": "Downloads the candidate physical resume file (PDF, DOCX, DOC) directly from FilePathUpload or FilePath with Content-Disposition attachment.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Download Candidate Resume (by File Name / Stem)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/download/{{sampleFileName}}",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "download",
+                                "{{sampleFileName}}",
+                            ],
+                        },
+                        "description": "Streams the raw candidate resume file by filename or file stem with Content-Disposition attachment.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Get Candidate By File Stem",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/by-stem/{{sampleFileName}}",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "by-stem",
+                                "{{sampleFileName}}",
+                            ],
+                        },
+                        "description": "Finds candidate resume by exact filename or file stem with fallback to Extracted data folder.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Get Candidate Profile Domain Classification",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/profile",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "profile",
+                            ],
+                        },
+                        "description": "Retrieves core domain profile classification (Mechanical, Software, Civil, etc.) and candidate summary.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Get Candidate Page Layout & Bounding Boxes",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/layout?page_number=1",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "layout",
+                            ],
+                            "query": [
+                                {
+                                    "key": "page_number",
+                                    "value": "1",
+                                    "description": "Optional 1-indexed page number",
+                                }
+                            ],
+                        },
+                        "description": "Returns visual page geometry, dimensions, and text layer bounding boxes for resume visual verification.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Get Candidate Structural Layout Blocks",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/blocks?page_number=1",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "blocks",
+                            ],
+                            "query": [
+                                {
+                                    "key": "page_number",
+                                    "value": "1",
+                                    "description": "Optional 1-indexed page number",
+                                }
+                            ],
+                        },
+                        "description": "Retrieves high-level semantic blocks (header, experience, education, skills).",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Update Candidate Field (Human Review / Correction)",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {"key": "Content-Type", "value": "application/json"},
+                            {"key": "Accept", "value": "application/json"},
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": '{\n  "field_name": "full_name",\n  "new_value": "Aakrati Agrawal",\n  "user_id": 1\n}',
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/field",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "field",
+                            ],
+                        },
+                        "description": "Updates an extracted candidate field value (e.g. full_name, email, skills, summary) for human review and corrections.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Delete Candidate Document",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}?soft_delete=true",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                            ],
+                            "query": [
+                                {
+                                    "key": "soft_delete",
+                                    "value": "true",
+                                    "description": "Soft-delete (true) or hard-delete (false)",
+                                }
+                            ],
+                        },
+                        "description": "Soft-deletes or permanently removes a candidate document and its extractions.",
+                    },
+                    "response": [],
+                },
+            ],
+        },
+        {
+            "name": "Files & Resume Uploads",
+            "description": "Endpoints for uploading documents to FilePathUpload, batch directory processing, and manifest status.",
+            "item": [
+                {
+                    "name": "Upload Single Document (FilePathUpload)",
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "file",
+                                    "type": "file",
+                                    "description": "PDF, DOCX, or DOC resume document to upload and save to FilePathUpload",
+                                }
+                            ],
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/files/upload",
+                            "host": ["{{baseUrl}}"],
+                            "path": ["{{apiPrefix}}", "files", "upload"],
+                        },
+                        "description": "Uploads a single resume document (PDF, DOC, DOCX), saves it into the configured FilePathUpload directory, immediately performs structured AI extraction, and writes extracted JSON to 'Extracted data'.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Upload Multiple Documents (FilePathUpload)",
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "files",
+                                    "type": "file",
+                                    "description": "Multiple PDF, DOCX, or DOC documents to batch upload",
+                                }
+                            ],
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/files/upload-multiple",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "files",
+                                "upload-multiple",
+                            ],
+                        },
+                        "description": "Uploads multiple resume documents simultaneously, saving each into FilePathUpload, extracting structured candidate data, and generating individual JSON files in 'Extracted data'.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Process Manifest Directory",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {"key": "Content-Type", "value": "application/json"},
+                            {"key": "Accept", "value": "application/json"},
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": '{\n  "recursive": false,\n  "generate_manifest_file": true\n}',
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/files/manifest/process",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "files",
+                                "manifest",
+                                "process",
+                            ],
+                        },
+                        "description": "Scans the configured FilePath directory, extracts all PDF/DOC/DOCX documents, and writes individual JSON files to 'Extracted data'.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Manifest Status & Discovery",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/files/manifest/status",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "files",
+                                "manifest",
+                                "status",
+                            ],
+                        },
+                        "description": "Returns status and document counts across FilePath, FilePathUpload, and Extracted data.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Get Extracted Document By Stem",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/files/manifest/extracted/{{sampleFileName}}",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "files",
+                                "manifest",
+                                "extracted",
+                                "{{sampleFileName}}",
+                            ],
+                        },
+                        "description": "Retrieves the extracted JSON for a specific resume file stem.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "List All Extracted Documents",
+                    "request": {
+                        "method": "GET",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/files/extracted",
+                            "host": ["{{baseUrl}}"],
+                            "path": ["{{apiPrefix}}", "files", "extracted"],
+                        },
+                        "description": "Loads and returns all extracted JSON files from Extracted data directory.",
+                    },
+                    "response": [],
+                },
+            ],
+        },
+    ],
+}
+
+backend_path = Path("/home/omkar/Documents/System Mech/CVForge_backend/CVForge_API.postman_collection.json")
+frontend_path = Path("/home/omkar/Documents/System Mech/CVForge_Frontend/CVForge_frontend/CVForge_API.postman_collection.json")
+
+backend_path.write_text(json.dumps(collection, indent=2), encoding="utf-8")
+print(f"Written: {backend_path} ({backend_path.stat().st_size} bytes)")
+
+if frontend_path.parent.exists():
+    frontend_path.write_text(json.dumps(collection, indent=2), encoding="utf-8")
+    print(f"Written: {frontend_path} ({frontend_path.stat().st_size} bytes)")

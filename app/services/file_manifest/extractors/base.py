@@ -1,102 +1,131 @@
-"""Base extractor interface and common utility functions for document extraction."""
+# ----------------------------------------
+# Imports
+# ----------------------------------------
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
 import hashlib
 import mimetypes
-import os
 from pathlib import Path
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
 from app.services.file_manifest.schemas import (
     CandidateLinks,
-    EducationItem,
-    ExperienceItem,
     ExtractedDocument,
 )
 
 
+# ----------------------------------------
+# Base Document Extractor
+# ----------------------------------------
+
 class BaseDocumentExtractor(ABC):
-    """Abstract base class for all file type extractors (PDF, DOCX, DOC)."""
 
     @abstractmethod
     def extract(
-        self, file_path: Path, images_output_dir: Optional[Path] = None
+        self,
+        file_path: Path,
+        images_output_dir: Optional[Path] = None,
     ) -> ExtractedDocument:
-        """Extract content, metadata, entities, and images from the given file."""
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
-    def supports_extension(self, extension: str) -> bool:
-        """Check if this extractor supports the given file extension."""
-        pass
+    # ----------------------------------------
+    # File Utilities
+    # ----------------------------------------
 
-    # -------------------------------------------------------------------------
-    # Helper utilities available to all extractor subclasses
-    # -------------------------------------------------------------------------
     @staticmethod
     def compute_sha256(file_path: Path) -> str:
-        """Compute SHA-256 checksum for a file."""
-        hasher = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+        sha256 = hashlib.sha256()
+
+        with file_path.open("rb") as file:
+            for chunk in iter(lambda: file.read(64 * 1024), b""):
+                sha256.update(chunk)
+
+        return sha256.hexdigest()
 
     @staticmethod
-    def get_file_metadata_stats(file_path: Path) -> Tuple[int, float, Optional[str]]:
-        """Return (size_in_bytes, size_in_kb, mime_type)."""
-        stat = file_path.stat()
-        size_bytes = stat.st_size
-        size_kb = round(size_bytes / 1024.0, 2)
-        mime_type, _ = mimetypes.guess_type(str(file_path))
+    def get_file_metadata_stats(
+        file_path: Path,
+    ) -> Tuple[int, float, Optional[str]]:
+        size_bytes = file_path.stat().st_size
+        size_kb = round(size_bytes / 1024, 2)
+        mime_type, _ = mimetypes.guess_type(file_path.name)
+
         return size_bytes, size_kb, mime_type
+
+    # ----------------------------------------
+    # Text Utilities
+    # ----------------------------------------
 
     @staticmethod
     def clean_extracted_text(text: str) -> str:
-        """Normalize whitespace, remove null bytes and extraneous blank lines."""
         if not text:
             return ""
-        # Remove null characters and non-printable control characters (except newline, tab)
-        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-        # Normalize carriage returns and line endings
+
+        # Remove unwanted control characters.
+        text = re.sub(
+            r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]",
+            "",
+            text,
+        )
+
+        # Normalize line endings.
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        # Replace multiple spaces with a single space
-        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
-        # Remove consecutive blank lines
-        cleaned_lines: List[str] = []
-        last_blank = False
+
+        # Remove extra spaces.
+        lines = [
+            re.sub(r"[ \t]+", " ", line).strip()
+            for line in text.split("\n")
+        ]
+
+        # Remove repeated blank lines.
+        cleaned_lines = []
+        previous_blank = False
+
         for line in lines:
             if not line:
-                if not last_blank:
-                    cleaned_lines.append("")
-                    last_blank = True
+                if previous_blank:
+                    continue
+
+                previous_blank = True
+                cleaned_lines.append("")
             else:
+                previous_blank = False
                 cleaned_lines.append(line)
-                last_blank = False
+
         return "\n".join(cleaned_lines).strip()
 
     @staticmethod
     def split_paragraphs(text: str) -> List[str]:
-        """Split cleaned text into distinct non-empty paragraphs."""
-        raw_paragraphs = re.split(r"\n\s*\n+", text)
-        paragraphs = [p.strip() for p in raw_paragraphs if p.strip()]
-        if not paragraphs and text.strip():
-            # If no double-newline, split on single newlines
-            paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
-        return paragraphs
+        if not text:
+            return []
+
+        paragraphs = re.split(r"\n\s*\n+", text)
+
+        return [
+            paragraph.strip()
+            for paragraph in paragraphs
+            if paragraph.strip()
+        ]
 
     @staticmethod
-    def compute_word_character_counts(text: str) -> Tuple[int, int]:
-        """Count words and characters in text."""
+    def compute_word_character_counts(
+        text: str,
+    ) -> Tuple[int, int]:
         words = len(re.findall(r"\b\w+\b", text))
-        chars = len(text)
-        return words, chars
+        characters = len(text)
 
+        return words, characters
+
+    # ----------------------------------------
+    # Error Handling
+    # ----------------------------------------
+
+    @staticmethod
     def create_failed_document(
-        self, file_path: Path, error_message: str
+        file_path: Path,
+        error_message: str,
     ) -> ExtractedDocument:
-        """Create a standardized failed ExtractedDocument instance."""
         return ExtractedDocument(
             file_name=file_path.name,
             file_stem=file_path.stem,
@@ -112,3 +141,64 @@ class BaseDocumentExtractor(ABC):
             embedding=None,
             error_message=error_message,
         )
+
+
+# ----------------------------------------
+# Extractor Factory
+# ----------------------------------------
+
+class ExtractorFactory:
+
+    def __init__(self) -> None:
+        self._extractors: Dict[str, BaseDocumentExtractor] = {}
+
+    # ----------------------------------------
+    # Register Extractor
+    # ----------------------------------------
+
+    def register_extractor(
+        self,
+        extension: str,
+        extractor: BaseDocumentExtractor,
+    ) -> None:
+        extension = extension.lower()
+
+        if not extension.startswith("."):
+            extension = f".{extension}"
+
+        self._extractors[extension] = extractor
+
+    # ----------------------------------------
+    # Get Extractor
+    # ----------------------------------------
+
+    def get_extractor(
+        self,
+        file_path: Path,
+    ) -> Optional[BaseDocumentExtractor]:
+        return self._extractors.get(file_path.suffix.lower())
+
+    # ----------------------------------------
+    # Get Supported Extensions
+    # ----------------------------------------
+
+    def get_supported_extensions(self) -> List[str]:
+        return list(self._extractors.keys())
+
+
+# ----------------------------------------
+# Default Factory
+# ----------------------------------------
+
+default_extractor_factory = ExtractorFactory()
+
+
+# ----------------------------------------
+# Public Exports
+# ----------------------------------------
+
+__all__ = [
+    "BaseDocumentExtractor",
+    "ExtractorFactory",
+    "default_extractor_factory",
+]
