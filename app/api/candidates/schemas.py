@@ -246,6 +246,23 @@ class CandidateStatsResponse(BaseModel):
     top_skills: List[Dict[str, Any]] = Field(default_factory=list, description="Top skills and their frequencies")
 
 
+class DeleteCandidateResponse(BaseModel):
+    """Response model for candidate deletion operations."""
+
+    document_id: int = Field(..., description="Document ID of the deleted candidate")
+    deleted: bool = Field(default=True, description="Whether the deletion succeeded")
+    soft_delete: bool = Field(default=True, description="Whether the deletion was a soft delete")
+    message: str = Field(..., description="Human-readable status message")
+
+
+class RestoreCandidateResponse(BaseModel):
+    """Response model for restoring a soft-deleted candidate."""
+
+    document_id: int = Field(..., description="Document ID of the restored candidate")
+    restored: bool = Field(default=True, description="Whether the restoration succeeded")
+    message: str = Field(..., description="Human-readable status message")
+
+
 __all__ = [
     "CandidateSummary",
     "CandidateListResponse",
@@ -258,4 +275,6 @@ __all__ = [
     "EditCandidateProfileRequest",
     "EditCandidateProfileResponse",
     "CandidateStatsResponse",
+    "DeleteCandidateResponse",
+    "RestoreCandidateResponse",
 ]

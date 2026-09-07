@@ -21,6 +21,9 @@ COMPANY_KEYWORDS: Set[str] = set(KEYWORDS_DATA.get("company_keywords", []))
 COMMON_SKILLS: List[str] = KEYWORDS_DATA.get("common_skills", [])
 NON_SKILL_WORDS: Set[str] = set(KEYWORDS_DATA.get("non_skill_words", []))
 PROJECT_FOOTER_KEYWORDS: Set[str] = set(KEYWORDS_DATA.get("project_footer_keywords", []))
+QUESTIONNAIRE_KEYWORDS: Set[str] = set(KEYWORDS_DATA.get("questionnaire_keywords", []))
+NAME_DISQUALIFIERS: Set[str] = set(KEYWORDS_DATA.get("name_disqualifiers", []))
+NEGATIVE_ROLE_KEYWORDS: Set[str] = set(KEYWORDS_DATA.get("negative_role_keywords", []))
 
 
 # ----------------------------------------
@@ -83,6 +86,9 @@ __all__ = [
     "COMMON_SKILLS",
     "NON_SKILL_WORDS",
     "PROJECT_FOOTER_KEYWORDS",
+    "QUESTIONNAIRE_KEYWORDS",
+    "NAME_DISQUALIFIERS",
+    "NEGATIVE_ROLE_KEYWORDS",
     "ROLE_KEYWORDS_DISQUALIFIERS",
     "COMPANY_INDICATORS_DISQUALIFIERS",
     "MONTH_DISQUALIFIERS",

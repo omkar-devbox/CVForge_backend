@@ -1015,12 +1015,17 @@ class FileManifestDatabaseSaver:
     # High-Level Queries & Manageable Data Access
     # =========================================================================
 
-    def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
-        """Fetch document metadata record by document_id."""
+    def get_document(
+        self,
+        document_id: int,
+        include_deleted: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve core document row by document ID."""
         with self.db.connection() as conn:
             with conn.cursor() as cur:
+                where_clause = "WHERE d.id = %s" if include_deleted else "WHERE d.id = %s AND d.is_deleted = FALSE"
                 cur.execute(
-                    """
+                    f"""
                     SELECT 
                         d.id AS document_id,
                         d.project_id,
@@ -1033,10 +1038,11 @@ class FileManifestDatabaseSaver:
                         d.status,
                         d.metadata,
                         d.created_at,
-                        d.updated_at
+                        d.updated_at,
+                        d.is_deleted
                     FROM document.documents d
                     JOIN project.projects p ON d.project_id = p.id
-                    WHERE d.id = %s AND d.is_deleted = FALSE;
+                    {where_clause};
                     """,
                     (document_id,),
                 )
@@ -1267,11 +1273,12 @@ class FileManifestDatabaseSaver:
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        include_deleted: bool = False,
     ) -> Dict[str, Any]:
         """List resumes with candidate names, emails, skills summary, status, and pagination."""
         with self.db.connection() as conn:
             with conn.cursor() as cur:
-                where_conds = ["d.is_deleted = FALSE"]
+                where_conds = [] if include_deleted else ["d.is_deleted = FALSE"]
                 params: List[Any] = []
                 if project_name:
                     where_conds.append("p.name = %s")
@@ -1945,9 +1952,45 @@ class FileManifestDatabaseSaver:
                         )
                         cur.execute(
                             """
+                            UPDATE extraction.candidate_profiles
+                            SET is_deleted = TRUE, deleted_at = NOW()
+                            WHERE document_id = %s;
+                            """,
+                            (document_id,),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE extraction.extraction_data
+                            SET is_deleted = TRUE, deleted_at = NOW()
+                            WHERE extraction_id IN (
+                                SELECT id FROM extraction.extractions WHERE document_id = %s
+                            );
+                            """,
+                            (document_id,),
+                        )
+                        cur.execute(
+                            """
                             UPDATE document.document_pages
                             SET is_deleted = TRUE, deleted_at = NOW()
                             WHERE document_id = %s;
+                            """,
+                            (document_id,),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE document.document_versions
+                            SET is_deleted = TRUE, deleted_at = NOW()
+                            WHERE document_id = %s;
+                            """,
+                            (document_id,),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE structure.blocks
+                            SET is_deleted = TRUE, deleted_at = NOW()
+                            WHERE page_id IN (
+                                SELECT id FROM document.document_pages WHERE document_id = %s
+                            );
                             """,
                             (document_id,),
                         )
@@ -1958,6 +2001,74 @@ class FileManifestDatabaseSaver:
                         (document_id,),
                     )
                     return True
+
+    def restore_document(self, document_id: int) -> bool:
+        """Restore a soft-deleted document and its associated records."""
+        with self.db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE document.documents
+                    SET is_deleted = FALSE, deleted_at = NULL
+                    WHERE id = %s AND is_deleted = TRUE;
+                    """,
+                    (document_id,),
+                )
+                affected = cur.rowcount if hasattr(cur, "rowcount") else 1
+                if affected > 0:
+                    cur.execute(
+                        """
+                        UPDATE extraction.extractions
+                        SET is_deleted = FALSE, deleted_at = NULL
+                        WHERE document_id = %s;
+                        """,
+                        (document_id,),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE extraction.candidate_profiles
+                        SET is_deleted = FALSE, deleted_at = NULL
+                        WHERE document_id = %s;
+                        """,
+                        (document_id,),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE extraction.extraction_data
+                        SET is_deleted = FALSE, deleted_at = NULL
+                        WHERE extraction_id IN (
+                            SELECT id FROM extraction.extractions WHERE document_id = %s
+                        );
+                        """,
+                        (document_id,),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE document.document_pages
+                        SET is_deleted = FALSE, deleted_at = NULL
+                        WHERE document_id = %s;
+                        """,
+                        (document_id,),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE document.document_versions
+                        SET is_deleted = FALSE, deleted_at = NULL
+                        WHERE document_id = %s;
+                        """,
+                        (document_id,),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE structure.blocks
+                        SET is_deleted = FALSE, deleted_at = NULL
+                        WHERE page_id IN (
+                            SELECT id FROM document.document_pages WHERE document_id = %s
+                        );
+                        """,
+                        (document_id,),
+                    )
+                return affected > 0
 
     def get_project_statistics(
         self,

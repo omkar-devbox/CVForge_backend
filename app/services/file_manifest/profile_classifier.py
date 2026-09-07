@@ -16,6 +16,7 @@ Analyzes candidate skills, tools, experience, education, and roles to:
 2. Extract normalized candidate metadata: name, email, role, experience, education.
 """
 
+from datetime import datetime
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -36,12 +37,15 @@ class ProfileClassifier:
                 "automotive design", "powertrain", "chassis", "welding", "casting",
                 "forging", "injection molding", "solid edge", "inventor", "draftsman",
                 "cad", "cae", "tribology", "heat transfer", "vave", "jit",
+                "ls-dyna", "ls dyna", "ansa", "msc-adams", "adams", "meshworks",
+                "primer", "animator", "crash analysis", "occupant safety",
             ],
             "roles_and_degrees": [
                 "mechanical", "mechatronics", "automobile", "automotive", "aerospace",
                 "production", "manufacturing", "industrial", "tool & die", "cad engineer",
                 "design engineer", "mechanical engineer", "draftsman", "piping engineer",
-                "hvac engineer", "tool design engineer",
+                "hvac engineer", "tool design engineer", "cae engineer", "crash engineer",
+                "occupant safety engineer", "safety engineer",
             ],
         },
         "Software": {
@@ -310,9 +314,82 @@ class ProfileClassifier:
             "total_experience": recruitment_insights.get("total_experience"),
             "notice_period": recruitment_insights.get("notice_period"),
             "current_ctc": recruitment_insights.get("current_ctc"),
-            "expected_ctc": recruitment_insights.get("expected_ctc"),
+"expected_ctc": recruitment_insights.get("expected_ctc"),
             "note": recruitment_insights.get("note"),
         }
+
+    @classmethod
+    def _calculate_total_experience_from_items(cls, experiences: List[Any]) -> Optional[str]:
+        """Dynamically computes total experience interval from experience items."""
+        if not experiences:
+            return None
+
+        intervals = []
+        for exp in experiences:
+            s_date = getattr(exp, "start_date", None) or (exp.get("start_date") if isinstance(exp, dict) else None)
+            e_date = getattr(exp, "end_date", None) or (exp.get("end_date") if isinstance(exp, dict) else None)
+            is_curr = getattr(exp, "is_current", False) or (exp.get("is_current") if isinstance(exp, dict) else False)
+            dur_str = getattr(exp, "duration", None) or (exp.get("duration") if isinstance(exp, dict) else None)
+
+            start_month_num = None
+            end_month_num = None
+
+            if s_date:
+                m_s = re.match(r"^(\d{4})(?:-(\d{1,2}))?", str(s_date).strip())
+                if m_s:
+                    sy = int(m_s.group(1))
+                    sm = int(m_s.group(2)) if m_s.group(2) else 1
+                    start_month_num = sy * 12 + sm
+
+            if is_curr or (dur_str and "present" in str(dur_str).lower()):
+                now = datetime.now()
+                end_month_num = now.year * 12 + now.month
+            elif e_date:
+                m_e = re.match(r"^(\d{4})(?:-(\d{1,2}))?", str(e_date).strip())
+                if m_e:
+                    ey = int(m_e.group(1))
+                    em = int(m_e.group(2)) if m_e.group(2) else 12
+                    end_month_num = ey * 12 + em
+
+            if start_month_num and end_month_num and end_month_num >= start_month_num:
+                intervals.append((start_month_num, end_month_num))
+            elif dur_str:
+                dm = re.search(r"(\d+(?:\.\d+)?)\s*(?:years?|yrs?)", str(dur_str), re.IGNORECASE)
+                if dm:
+                    y_val = float(dm.group(1))
+                    m_val = 0.0
+                    mm = re.search(r"(\d+)\s*(?:months?|m\b)", str(dur_str), re.IGNORECASE)
+                    if mm:
+                        m_val = float(mm.group(1))
+                    tot_m = int(y_val * 12 + m_val)
+                    if tot_m > 0:
+                        intervals.append((0, tot_m))
+
+        if not intervals:
+            return None
+
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for curr in intervals[1:]:
+            prev_start, prev_end = merged[-1]
+            curr_start, curr_end = curr
+            if curr_start <= prev_end:
+                merged[-1] = (prev_start, max(prev_end, curr_end))
+            else:
+                merged.append(curr)
+
+        total_months = sum(end - start for start, end in merged)
+        if total_months <= 0:
+            return None
+
+        years = total_months // 12
+        rem_m = total_months % 12
+        if years == 0:
+            return f"{rem_m} Months"
+        elif rem_m >= 2:
+            return f"{years}y {rem_m}m"
+        else:
+            return f"{years} Years"
 
     @classmethod
     def _extract_recruitment_insights(
@@ -320,6 +397,7 @@ class ProfileClassifier:
         doc: Any,
         experiences: List[Dict[str, Any]],
         summary: str,
+        nemotron_parser: Optional[Any] = None,
         gemma_extractor: Optional[Any] = None,
         enable_llm: bool = True,
     ) -> Dict[str, Optional[str]]:
@@ -386,6 +464,57 @@ class ProfileClassifier:
             except Exception:
                 pass
 
+        # Structured table extraction (both key-value rows and two-row grid blocks)
+        for t in tables:
+            rows = getattr(t, "rows", []) if not isinstance(t, dict) else t.get("rows", [])
+            for r_idx, row in enumerate(rows):
+                cleaned_r = []
+                for c in row:
+                    c_str = str(c).replace("\n", " ").strip()
+                    if not cleaned_r or c_str != cleaned_r[-1]:
+                        cleaned_r.append(c_str)
+
+                # 1. Check next row at same column index for grid headers
+                if r_idx + 1 < len(rows):
+                    next_row = []
+                    for c in rows[r_idx + 1]:
+                        c_str = str(c).replace("\n", " ").strip()
+                        if not next_row or c_str != next_row[-1]:
+                            next_row.append(c_str)
+
+                    for c_idx, cell_text in enumerate(cleaned_r):
+                        cl = cell_text.lower()
+                        if c_idx < len(next_row):
+                            val = next_row[c_idx].strip()
+                            if val and len(val) < 60 and not any(bad in val.lower() for bad in ["location", "native", "applied", "mandatory", "period", "ctc", "organization", "designation", "years", "score", "reason for"]):
+                                if ("current location" in cl or cl == "location") and not loc:
+                                    loc = val
+                                elif "current ctc" in cl and not curr_ctc:
+                                    curr_ctc = f"{val} LPA" if not any(u in val.lower() for u in ["lpa", "lacs", "lakh", "k"]) and re.match(r"^\d+(\.\d+)?$", val) else val
+                                elif ("expected ctc" in cl or "% increase" in cl) and not exp_ctc:
+                                    exp_ctc = f"{val} LPA" if not any(u in val.lower() for u in ["lpa", "lacs", "lakh", "k", "%", "hike"]) and re.match(r"^\d+(\.\d+)?$", val) else val
+                                elif "notice period" in cl and not notice:
+                                    notice = val
+                                elif "total experience" in cl and not total_exp:
+                                    total_exp = val
+
+                # 2. Check same-row key-value pairs (e.g. Current Location | Lucknow | ...)
+                for c_idx, cell_text in enumerate(cleaned_r):
+                    cl = cell_text.lower()
+                    if c_idx + 1 < len(cleaned_r):
+                        val = cleaned_r[c_idx + 1].strip()
+                        if val and len(val) < 60 and not any(bad in val.lower() for bad in ["location", "native", "applied", "mandatory", "period", "ctc", "contact", "email", "gender", "name of", "reason for"]):
+                            if ("current location" in cl or cl == "location") and not loc:
+                                loc = val
+                            elif "current ctc" in cl and not curr_ctc:
+                                curr_ctc = f"{val} LPA" if not any(u in val.lower() for u in ["lpa", "lacs", "lakh", "k"]) and re.match(r"^\d+(\.\d+)?$", val) else val
+                            elif ("expected ctc" in cl or "% increase" in cl) and not exp_ctc:
+                                exp_ctc = f"{val} LPA" if not any(u in val.lower() for u in ["lpa", "lacs", "lakh", "k", "%", "hike"]) and re.match(r"^\d+(\.\d+)?$", val) else val
+                            elif "notice period" in cl and not notice:
+                                notice = val
+                            elif "total experience" in cl and not total_exp:
+                                total_exp = val
+
         # A. Total Experience
         if not total_exp:
             # 1. Filename pattern e.g. [5y_0m] or [10y_0m] or _4y_6m
@@ -395,26 +524,37 @@ class ProfileClassifier:
                 total_exp = f"{y} Years" if m == "0" else f"{y}y {m}m"
 
         if not total_exp and summary:
-            sm = re.search(r"(?:over|with|around|having)?\s*(\d+(?:\.\d+)?\+?)\s*(?:years|yrs)\s*(?:of)?\s*experience", summary, re.IGNORECASE)
+            sm = re.search(
+                r"(?:over|with|around|having)?\s*(\d+(?:\.\d+)?\+?)\s*(?:years|yrs)\s*(?:of)?\s*(?:rich\s+)?(?:experience|expertise|domain\s+expertise|industry\s+experience|professional\s+experience)",
+                summary,
+                re.IGNORECASE,
+            )
             if sm:
                 total_exp = f"{sm.group(1)} Years"
 
         if not total_exp:
-            em = re.search(r"(?:total\s+experience|experience)[:\s|]+(\d+(?:\.\d+)?\+?\s*(?:years|yrs)(?:\s*\d+\s*(?:months|m))?)", full_text, re.IGNORECASE)
+            em = re.search(
+                r"(?:total\s+experience|overall\s+experience|experience|domain\s+expertise)[:\s|–-]+(\d+(?:\.\d+)?\+?\s*(?:years|yrs)(?:\s*\d+\s*(?:months|m))?)",
+                full_text,
+                re.IGNORECASE,
+            )
             if em:
                 total_exp = em.group(1).strip()
+
+        if not total_exp and experiences:
+            total_exp = cls._calculate_total_experience_from_items(experiences)
 
         # B. Location
         if not loc:
             for i, c in enumerate(table_cells):
                 if c.lower() == "location" and i + 1 < len(table_cells):
                     cand = table_cells[i + 1].strip()
-                    if cand and len(cand) < 60:
+                    if cand and len(cand) < 60 and not any(bad in cand.lower() for bad in ["applied", "mandatory", "location", "native"]):
                         loc = cand
                         break
-                if "location:" in c.lower():
-                    cand = re.sub(r"(?i)^.*?location:\s*", "", c).strip()
-                    if cand and len(cand) < 60:
+                if "location:" in c.lower() or "current location" in c.lower():
+                    cand = re.sub(r"(?i)^.*?(?:current\s+)?location[:\s–-]+", "", c).strip()
+                    if cand and len(cand) < 60 and not any(bad in cand.lower() for bad in ["applied", "mandatory", "location", "native"]):
                         loc = cand
                         break
                 m_city = re.search(r"([A-Za-z]+,\s*INDIA)", c)
@@ -423,10 +563,10 @@ class ProfileClassifier:
                     break
 
         if not loc:
-            lm = re.search(r"(?:your\s+current\s+location|current\s+location|location)[:\s]+([A-Za-z\s/,-]+?)(?:\n|\r|$)", full_text, re.IGNORECASE)
+            lm = re.search(r"(?:your\s+current\s+location|current\s+location|native\s+location|location)[:\s\t–-]+([A-Za-z\s/,-]+?)(?:\s*\(|\[|\]|\n|\r|$)", full_text, re.IGNORECASE)
             if lm:
                 cand = lm.group(1).strip()
-                if cand and len(cand) < 60 and not any(w in cand.lower() for w in ["willingness", "salary", "gross", "your"]):
+                if cand and len(cand) < 60 and not any(w in cand.lower() for w in ["applied", "willingness", "salary", "gross", "your"]):
                     loc = cand
 
         if not loc and experiences:
@@ -437,16 +577,21 @@ class ProfileClassifier:
                     break
 
         if not loc:
-            known_cities = ["Pune", "Bengaluru", "Bangalore", "Mumbai", "Delhi", "Hyderabad", "Ahmedabad", "Chennai", "Kolkata", "Noida", "Gurgaon", "Indore"]
+            known_cities = ["Pune", "Bengaluru", "Bangalore", "Mumbai", "Delhi", "Hyderabad", "Ahmedabad", "Chennai", "Kolkata", "Noida", "Gurgaon", "Indore", "Jamshedpur", "Ranchi", "Bhubaneswar", "Jaipur", "Lucknow", "Nagpur", "Vadodara"]
             lines = [l.strip() for l in full_text.splitlines() if l.strip()]
             for line in lines[:15]:
-                if any(city in line for city in known_cities):
-                    if len(line) < 90 and not any(w in line.lower() for w in ["engineer", "developer", "experience", "degree", "manager", "university", "college", "school"]):
-                        loc = line
-                        break
+                for city in known_cities:
+                    if re.search(rf"\b{re.escape(city)}\b", line, re.IGNORECASE):
+                        if len(line) < 90 and not any(w in line.lower() for w in ["engineer", "developer", "experience", "degree", "manager", "university", "college", "school"]):
+                            loc = line
+                            break
+                if loc:
+                    break
 
         # Fallback to education or experience institution city if still missing
-        if not loc and "indore" in full_text.lower():
+        if not loc and "jamshedpur" in full_text.lower():
+            loc = "Jamshedpur, INDIA"
+        elif not loc and "indore" in full_text.lower():
             loc = "Indore, INDIA"
         elif not loc and "pune" in full_text.lower():
             loc = "Pune, INDIA"
@@ -460,20 +605,20 @@ class ProfileClassifier:
             for i, c in enumerate(table_cells):
                 if "what is your notice period" in c.lower() and i + 1 < len(table_cells):
                     cand = table_cells[i + 1].strip()
-                    if cand and not cand.lower().startswith("what"):
+                    if cand and not any(bad in cand.lower() for bad in ["what", "reason", "change", "notice period", "mandatory", "location"]):
                         notice = cand
                         break
                 if "notice period:" in c.lower():
                     cand = re.sub(r"(?i)^.*?notice\s+period:\s*", "", c).strip()
-                    if cand and len(cand) < 40 and not cand.lower().startswith("what"):
+                    if cand and len(cand) < 40 and not any(bad in cand.lower() for bad in ["what", "reason", "change", "notice period", "mandatory", "location"]):
                         notice = cand
                         break
 
         if not notice:
-            nm = re.search(r"(?:notice\s+period|notice)[:\s]+([^\n\r]+)", full_text, re.IGNORECASE)
+            nm = re.search(r"(?:notice\s*period|notice|serving\s*notice)[:\s\t–-]+([0-9]+\s*(?:days?|months?)|immediate(?:ly)?|ready\s*to\s*join)", full_text, re.IGNORECASE)
             if nm:
                 cand = nm.group(1).strip()
-                if cand and len(cand) < 40 and not any(w in cand.lower() for w in ["what", "in your", "current company"]):
+                if cand and not any(w in cand.lower() for w in ["what", "reason", "change"]):
                     notice = cand
 
         # D. Current CTC
@@ -484,21 +629,38 @@ class ProfileClassifier:
                     if val.isdigit():
                         num = int(val)
                         curr_ctc = f"{num/100000:.1f} LPA" if num >= 100000 else f"{val}"
-                    elif val and not val.lower().startswith("what"):
-                        curr_ctc = val
+                    elif val and not any(bad in val.lower() for bad in ["what", "expected", "reason", "ctc"]):
+                        curr_ctc = f"{val} LPA" if re.match(r"^\d+(\.\d+)?$", val) else val
                     break
                 if "current ctc" in c.lower() or "current salary" in c.lower():
-                    cm = re.search(r"(?:current\s+ctc|current\s+salary)[:\s]*([0-9.]+\s*(?:lpa|lakhs?|lac|k)?)", c, re.IGNORECASE)
+                    cm = re.search(r"(?:current\s+ctc|current\s+salary)[:\s–-]*([0-9.]+\s*(?:lpa|lakhs?|lac|k)?)", c, re.IGNORECASE)
                     if cm:
-                        curr_ctc = cm.group(1).strip()
-                        break
+                        cand = cm.group(1).strip()
+                        if cand and not any(bad in cand.lower() for bad in ["what", "expected", "reason"]):
+                            curr_ctc = f"{cand} LPA" if re.match(r"^\d+(\.\d+)?$", cand) else cand
+                            break
 
         if not curr_ctc:
-            cm = re.search(r"(?:current\s+ctc|present\s+ctc|fixed\s+ctc|current\s+salary)[:\s]*([0-9.]+\s*(?:lpa|lakhs?|lac|k)?)", full_text, re.IGNORECASE)
+            m_ctc_q = re.search(r"(?:current\s+ctc|present\s+ctc|what\s+is\s+your\s+current\s+ctc)[^\n\r]*\n+([0-9.]+)", full_text, re.IGNORECASE)
+            if m_ctc_q:
+                val = m_ctc_q.group(1).strip()
+                if val.isdigit():
+                    num = int(val)
+                    curr_ctc = f"{num/100000:.1f} LPA" if num >= 100000 else f"{val}"
+                else:
+                    curr_ctc = val
+
+        if not curr_ctc:
+            cm = re.search(r"(?:current\s+ctc|present\s+ctc|fixed\s+ctc|current\s+salary)[:\s\t–-]+([0-9.]+\s*(?:lpa|lakhs?|lacs?|k)?)", full_text, re.IGNORECASE)
             if cm:
                 cand = cm.group(1).strip()
-                if cand and not any(w in cand.lower() for w in ["what", "expected"]):
-                    curr_ctc = cand
+                if cand and not any(w in cand.lower() for w in ["what", "expected", "reason"]):
+                    curr_ctc = f"{cand} LPA" if re.match(r"^\d+(\.\d+)?$", cand) else cand
+
+        if not curr_ctc:
+            cm = re.search(r"\b([0-9.]+\s*(?:lpa|lakhs?|lacs))\b", full_text, re.IGNORECASE)
+            if cm:
+                curr_ctc = cm.group(1).strip()
 
         # E. Expected CTC
         if not exp_ctc:
@@ -508,30 +670,40 @@ class ProfileClassifier:
                     if val.isdigit():
                         num = int(val)
                         exp_ctc = f"{num/100000:.1f} LPA" if num >= 100000 else f"{val}"
-                    elif val and not val.lower().startswith("what"):
-                        exp_ctc = val
+                    elif val and not any(bad in val.lower() for bad in ["what", "current", "reason", "ctc"]):
+                        exp_ctc = f"{val} LPA" if re.match(r"^\d+(\.\d+)?$", val) else val
                     break
                 if "expected ctc" in c.lower():
-                    cm = re.search(r"(?:expected\s+ctc)[:\s]*([0-9.]+\s*(?:lpa|lakhs?|lac|k)?)", c, re.IGNORECASE)
+                    cm = re.search(r"(?:expected\s+ctc)[:\s–-]*([0-9.]+\s*(?:lpa|lakhs?|lac|k)?|\d+%\s*hike)", c, re.IGNORECASE)
                     if cm:
                         exp_ctc = cm.group(1).strip()
                         break
 
         if not exp_ctc:
-            cm = re.search(r"(?:expected\s+ctc|expected\s+salary)[:\s]*([0-9.]+\s*(?:lpa|lakhs?|lac|k)?)", full_text, re.IGNORECASE)
+            m_exp_q = re.search(r"(?:expected\s+ctc|what\s+is\s+your\s+expected\s+ctc)[^\n\r]*\n+([0-9.]+)", full_text, re.IGNORECASE)
+            if m_exp_q:
+                val = m_exp_q.group(1).strip()
+                if val.isdigit():
+                    num = int(val)
+                    exp_ctc = f"{num/100000:.1f} LPA" if num >= 100000 else f"{val}"
+                else:
+                    exp_ctc = val
+
+        if not exp_ctc:
+            cm = re.search(r"(?:expected\s+ctc|expected\s+salary|expected)[:\s\t–-]+([0-9.]+\s*(?:lpa|lakhs?|lacs?|k)?|\d+%\s*hike)", full_text, re.IGNORECASE)
             if cm:
                 cand = cm.group(1).strip()
-                if cand and not any(w in cand.lower() for w in ["what", "gross"]):
-                    exp_ctc = cand
+                if cand and not any(w in cand.lower() for w in ["what", "gross", "current", "reason"]):
+                    exp_ctc = f"{cand} LPA" if re.match(r"^\d+(\.\d+)?$", cand) else cand
 
-        # F. LLM Refinement Fallback (Gemma-3-270m)
+        # F. LLM Refinement Fallback (Nemotron Parse)
         missing = [k for k, v in [("location", loc), ("total_experience", total_exp), ("notice_period", notice), ("current_ctc", curr_ctc), ("expected_ctc", exp_ctc)] if not v]
         if missing and enable_llm:
-            active_extractor = gemma_extractor
+            active_extractor = nemotron_parser or gemma_extractor
             if active_extractor is None:
                 try:
-                    from app.services.file_manifest.ai_models import GemmaExtractor
-                    inst = GemmaExtractor()
+                    from app.services.file_manifest.ai_models import NemotronParseExtractor
+                    inst = NemotronParseExtractor()
                     if inst.is_available():
                         active_extractor = inst
                 except Exception:
@@ -601,7 +773,10 @@ class ProfileClassifier:
         if not loc or not loc.strip():
             loc = "Not Specified"
         if not total_exp or not total_exp.strip():
-            total_exp = "1+ Years"
+            if experiences:
+                total_exp = cls._calculate_total_experience_from_items(experiences) or "1+ Years"
+            else:
+                total_exp = "Fresher"
         if not notice or not notice.strip():
             notice = "Negotiable"
         if not curr_ctc or not curr_ctc.strip():
@@ -930,3 +1105,5 @@ class ProfileClassifier:
         if "quality" in lowered or "qa" in lowered:
             return "Quality"
         return "General"
+
+    extract_profile_metadata = classify

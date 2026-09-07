@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from app.services.file_manifest.ai_models import (
     GemmaExtractor,
+    NemotronParseExtractor,
 )
 from app.services.file_manifest.extractors.base import (
     BaseDocumentExtractor,
@@ -26,16 +27,20 @@ from app.services.file_manifest.extractors.helper import (
     INLINE_HEADER_PATTERN,
     INSTITUTION_REGEXES,
     JUNK_PATTERNS,
+    CAMEL_CASE_PATTERN,
     KEYWORDS_DATA,
     KNOWN_LANGUAGES,
     KNOWN_LOCATIONS,
     KNOWN_TOOLS,
     LANGUAGES_HEADER_PATTERN,
     LINKEDIN_PATTERN,
+    NAME_DISQUALIFIERS,
     NAME_PREFIX_PATTERN,
+    NEGATIVE_ROLE_KEYWORDS,
     NON_SKILL_WORDS,
     PHONE_PATTERN,
     PROJECT_FOOTER_KEYWORDS,
+    QUESTIONNAIRE_KEYWORDS,
     ROLE_KEYWORDS,
     SEPARATOR_PATTERN,
     URL_PATTERN,
@@ -45,6 +50,7 @@ from app.services.file_manifest.extractors.helper import (
     infer_role_from_file_path,
     is_degree_string,
     is_institution_string,
+    is_invalid_degree_candidate,
     is_location,
     is_valid_skill,
     load_section_headers,
@@ -91,6 +97,9 @@ class EntityExtractor:
     COMMON_SKILLS: List[str] = COMMON_SKILLS
     NON_SKILL_WORDS: Set[str] = NON_SKILL_WORDS
     PROJECT_FOOTER_KEYWORDS: Set[str] = PROJECT_FOOTER_KEYWORDS
+    NAME_DISQUALIFIERS: Set[str] = NAME_DISQUALIFIERS
+    NEGATIVE_ROLE_KEYWORDS: Set[str] = NEGATIVE_ROLE_KEYWORDS
+    QUESTIONNAIRE_KEYWORDS: Set[str] = QUESTIONNAIRE_KEYWORDS
 
     KNOWN_LANGUAGES = KNOWN_LANGUAGES
     KNOWN_TOOLS = KNOWN_TOOLS
@@ -102,17 +111,22 @@ class EntityExtractor:
     def __init__(
         self,
         enable_llm: bool = True,
+        enable_nemotron: Optional[bool] = None,
+        nemotron_model_path: Optional[Union[str, Path]] = None,
         enable_gemma: Optional[bool] = None,
         gemma_model_dir: Optional[Union[str, Path]] = None,
         **kwargs: Any,
     ) -> None:
-        llm_enabled = enable_llm if enable_gemma is None else (enable_gemma or enable_llm)
+        llm_flag = enable_nemotron if enable_nemotron is not None else enable_gemma
+        llm_enabled = enable_llm if llm_flag is None else (llm_flag or enable_llm)
+        model_path = nemotron_model_path or gemma_model_dir
 
-        self.gemma_extractor = (
-            GemmaExtractor(model_dir=gemma_model_dir)
+        self.nemotron_parser = (
+            NemotronParseExtractor(model_dir=model_path)
             if llm_enabled
             else None
         )
+        self.gemma_extractor = self.nemotron_parser
 
     # ----------------------------------------
     # Validation Helpers
@@ -121,6 +135,10 @@ class EntityExtractor:
     @classmethod
     def is_degree_string(cls, text: Optional[str]) -> bool:
         return is_degree_string(text, cls.DEGREE_REGEXES)
+
+    @classmethod
+    def is_invalid_degree_candidate(cls, text: Optional[str]) -> bool:
+        return is_invalid_degree_candidate(text)
 
     @classmethod
     def is_institution_string(cls, text: Optional[str]) -> bool:
@@ -149,10 +167,11 @@ class EntityExtractor:
         file_path: Optional[Path] = None,
         tables: Optional[List[Any]] = None,
     ) -> EntityExtractionResult:
-        # 0. Guarantee fresh SLM session before extracting entities for this document
-        if self.gemma_extractor and hasattr(self.gemma_extractor, "clear_session"):
+        # 0. Guarantee fresh session before extracting entities for this document
+        active_p = self.nemotron_parser or self.gemma_extractor
+        if active_p and hasattr(active_p, "clear_session"):
             try:
-                self.gemma_extractor.clear_session()
+                active_p.clear_session()
             except Exception:
                 pass
 
@@ -175,9 +194,20 @@ class EntityExtractor:
             cleaned_text,
             skills_section=sections.get("skills", ""),
         )
-        skills = SkillNormalizer.normalize_and_deduplicate(
-            [skill for skill in raw_skills if self.is_valid_skill(skill)]
-        )
+        name_parts = set(candidate_name.lower().split()) if candidate_name else set()
+        cleaned_skills = []
+        for s in raw_skills:
+            if not self.is_valid_skill(s):
+                continue
+            s_l = s.strip().lower()
+            if candidate_name and (s_l in candidate_name.lower() or candidate_name.lower() in s_l):
+                continue
+            if name_parts and any(word in name_parts for word in s_l.split()):
+                continue
+            if s_l in ["software/language", "proficiency", "proficiencies", "technical skills", "skills", "key skills"]:
+                continue
+            cleaned_skills.append(s)
+        skills = SkillNormalizer.normalize_and_deduplicate(cleaned_skills)
 
         education = self.extract_education(sections.get("education", ""), full_text=cleaned_text)
         experience = self.extract_experience(sections.get("experience", ""), full_text=cleaned_text)
@@ -228,9 +258,10 @@ class EntityExtractor:
                     )
 
         # Selective generative LLM profile extraction and refinement.
+        parser_candidate = self.nemotron_parser or self.gemma_extractor
         active_llm = (
-            self.gemma_extractor
-            if (self.gemma_extractor and self.gemma_extractor.is_available())
+            parser_candidate
+            if (parser_candidate and parser_candidate.is_available())
             else None
         )
 
@@ -403,6 +434,37 @@ class EntityExtractor:
             file_path=file_path,
         )
 
+        # Bind role and company from header/candidate profile to experience items that lack company or have bullet-point roles
+        header_text = sections.get("header", "")
+        if experience and header_text:
+            header_lines = [l.strip() for l in header_text.splitlines() if l.strip()]
+            for exp in experience:
+                is_bullet_role = bool(
+                    exp.role and (
+                        len(exp.role.split()) > 7
+                        or exp.role.lower().startswith(("drive a team", "responsible for", "to manage", "experience in", "worked as", "leading a team"))
+                    )
+                )
+                if not exp.company or is_bullet_role:
+                    for h_idx, h_line in enumerate(header_lines):
+                        r_cand, c_cand, l_cand = self._split_role_and_company(h_line)
+                        if c_cand:
+                            c_clean = c_cand.strip().lower()
+                            if candidate_name and (c_clean == candidate_name.lower() or any(p in c_clean for p in candidate_name.lower().split() if len(p) > 2)):
+                                continue
+                            if len(c_clean.split()) > 6 or any(w in c_clean for w in ["started", "career", "experience", "industry", "quality", "delivering", "focus"]):
+                                continue
+                            if any(w in c_clean for w in ["limited", "ltd", "pvt", "inc", "corp", "technologies", "motors", "cars", "products", "solutions", "industries", "holdings"]):
+                                if is_bullet_role and exp.role and exp.role not in exp.highlights:
+                                    exp.highlights.insert(0, exp.role)
+                                exp.company = c_cand
+                                if l_cand and not exp.location:
+                                    exp.location = l_cand
+                                prev_h = header_lines[h_idx - 1] if h_idx > 0 else ""
+                                r_prev, _, _ = self._split_role_and_company(prev_h) if prev_h else (None, None, None)
+                                exp.role = r_cand or r_prev or role or "Manager"
+                                break
+
         return EntityExtractionResult(
             name=candidate_name,
             role=role,
@@ -558,7 +620,7 @@ class EntityExtractor:
             for line in skills_section.splitlines():
                 line_clean = line.strip("•*-\uf0b7 \t,;|")
 
-                if not line_clean or len(line_clean) > 160:
+                if not line_clean or len(line_clean) > 2500:
                     continue
 
                 line_without_label = re.sub(
@@ -620,12 +682,12 @@ class EntityExtractor:
             if SEPARATOR_PATTERN.match(line):
                 continue
 
-            # Filter recruitment questionnaire forms and footer noise.
+            # Filter recruitment questionnaire forms and footer noise from section content
             line_low = line.lower()
             if any(junk in line_low for junk in JUNK_PATTERNS):
-                current_section = "junk"
                 if "junk" not in sections:
                     sections["junk"] = []
+                sections["junk"].append(line)
                 continue
 
             # Check for inline header with colon.
@@ -670,6 +732,7 @@ class EntityExtractor:
                 continue
 
             header_candidates = [header_clean]
+            parts = []
             if "\t" in line or re.search(r"\s{3,}", line):
                 parts = [part.strip() for part in re.split(r"\t+|\s{3,}", line) if part.strip()]
                 for part in parts:
@@ -682,6 +745,7 @@ class EntityExtractor:
                         header_candidates.append(part_clean)
 
             matched_header = None
+            matched_candidate = None
             for candidate in header_candidates:
                 if len(candidate.split()) <= 5:
                     cand_no_space = re.sub(r"[\s\-_]+", "", candidate)
@@ -694,6 +758,7 @@ class EntityExtractor:
                                 or (cand_no_space and cand_no_space == header_no_space)
                             ):
                                 matched_header = sec_name
+                                matched_candidate = candidate
                                 break
                         if matched_header:
                             break
@@ -704,15 +769,30 @@ class EntityExtractor:
                 current_section = matched_header
                 if current_section not in sections:
                     sections[current_section] = []
+                # If the header line had trailing parts (e.g. "Keyskills\t\tLT Breakers, PLC..."), append remainder
+                if len(header_candidates) > 1 and parts and len(parts) > 1:
+                    first_part_clean = re.sub(
+                        r"^(?:(?:\d+|[ivxIVX]+|[A-Za-z])[\.\)]|[•\-\*\u2022\uf0b7])\s*",
+                        "",
+                        parts[0].lower().strip(":# -_•*~=[](){}"),
+                    ).strip()
+                    cand_clean = re.sub(r"[\s\-_]+", "", matched_candidate or "")
+                    if cand_clean and cand_clean == re.sub(r"[\s\-_]+", "", first_part_clean):
+                        remainder = " ".join(parts[1:]).strip()
+                        if remainder:
+                            sections[current_section].append(remainder)
                 continue
 
             sections[current_section].append(line)
 
-        return {
+        res = {
             sec: "\n".join(content_lines).strip()
             for sec, content_lines in sections.items()
             if content_lines and sec not in {"header", "junk"}
         }
+        if "header" in sections and sections["header"]:
+            res["header"] = "\n".join(sections["header"]).strip()
+        return res
 
     # ----------------------------------------
     # Table Entities
@@ -797,10 +877,23 @@ class EntityExtractor:
             ):
                 break
 
+            # If first line is duration like '609 Days', advance to next line for actual name
+            dur_prefix = None
+            if re.match(r"^\d+\s*(?:days?|months?|years?|yrs?|weeks?)$", first_clean, re.IGNORECASE):
+                dur_prefix = first_clean
+                lines.pop(0)
+                if not lines:
+                    continue
+                first_line = lines[0].lstrip("•-*\uf0b7 \t")
+                first_clean = first_line.lower().strip(" :#-_")
+
             parts = re.split(r"[:|\-–]", first_line, maxsplit=1)
             project_name = TextCleaner.clean_field(parts[0])
 
             if not project_name or len(project_name) < 2:
+                continue
+
+            if re.match(r"^\d+\s*(?:days?|months?|years?|yrs?|weeks?)$", project_name, re.IGNORECASE):
                 continue
 
             if any(keyword in project_name.lower() for keyword in self.PROJECT_FOOTER_KEYWORDS):
@@ -930,7 +1023,21 @@ class EntityExtractor:
                 regex.search(line) for regex in self.DEGREE_REGEXES
             )
 
-            if (has_pipe or starts_degree) and current_block:
+            is_detail_line = bool(
+                (self.DATE_PATTERN.search(line) or GRADUATION_YEAR_PATTERN.search(line) or CGPA_PATTERN.search(line))
+                and not starts_degree
+                and not self.is_institution_string(line)
+            )
+
+            is_new_block = False
+            if starts_degree:
+                is_new_block = True
+            elif has_pipe and not is_detail_line:
+                parts = [p.strip() for p in line.split("|") if p.strip()]
+                if any(self.is_degree_string(p) or any(r.search(p) for r in self.DEGREE_REGEXES) for p in parts):
+                    is_new_block = True
+
+            if is_new_block and current_block:
                 blocks.append(current_block)
                 current_block = [line]
             else:
@@ -946,9 +1053,9 @@ class EntityExtractor:
             details_list: List[str] = []
 
             for line in lines:
-                year_match = GRADUATION_YEAR_PATTERN.search(line)
+                year_match = self.DATE_PATTERN.search(line) or GRADUATION_YEAR_PATTERN.search(line)
                 if year_match and not duration:
-                    duration = year_match.group(1)
+                    duration = year_match.group(0).strip()
 
                 cgpa_match = CGPA_PATTERN.search(line)
                 if cgpa_match:
@@ -1025,6 +1132,8 @@ class EntityExtractor:
                         line != institution
                         and len(line.split()) <= 8
                         and not self.is_institution_string(line)
+                        and not self.is_invalid_degree_candidate(line)
+                        and not self.is_location(line)
                     ):
                         degree = line
                         break
@@ -1038,6 +1147,24 @@ class EntityExtractor:
                         institution = line
                         break
 
+            # Filter out invalid degree candidates that might have slipped through
+            if degree and self.is_invalid_degree_candidate(degree):
+                if re.search(r"(?:score|grade|marks|cgpa|gpa|percentage|percentile|air|rank)\b|\b\d+(\.\d+)?%", degree, re.IGNORECASE):
+                    if degree not in details_list:
+                        details_list.append(degree)
+                elif self.DATE_PATTERN.search(degree) or re.search(r"\b(?:19|20)\d{2}\b\s*(?:to|till|-|–|—)\s*(?:\b(?:19|20)\d{2}\b|present|current)", degree, re.IGNORECASE):
+                    if not duration:
+                        duration = degree
+                degree = None
+
+            # Secondary school stream detection if degree still missing
+            if institution and not degree:
+                for line in lines:
+                    m_sec = re.search(r"\b(science\s+stream|commerce\s+stream|arts\s+stream|science|commerce|arts|hsc|ssc|12th|10th|intermediate|matriculation|higher\s+secondary|senior\s+secondary)\b", line, re.IGNORECASE)
+                    if m_sec and not self.is_invalid_degree_candidate(m_sec.group(0)):
+                        degree = m_sec.group(0).strip().title()
+                        break
+
             if degree and self.is_institution_string(degree) and not self.is_degree_string(degree):
                 if not institution:
                     institution = degree
@@ -1045,21 +1172,49 @@ class EntityExtractor:
                 else:
                     degree, institution = institution, degree
 
+            # Multi-line degree handling (e.g. "B.Tech:- Mechanical" + next line "Engineering")
+            if degree and len(lines) >= 2:
+                if "engineering" not in degree.lower() and any(l.strip().lower() == "engineering" for l in lines):
+                    degree = f"{degree} Engineering"
+                elif "technology" not in degree.lower() and any(l.strip().lower() == "technology" for l in lines):
+                    degree = f"{degree} Technology"
+                else:
+                    for idx_l, cur_l in enumerate(lines):
+                        if (degree in cur_l or cur_l.startswith(degree)) and idx_l + 1 < len(lines):
+                            next_l = lines[idx_l + 1].strip()
+                            if (
+                                next_l.lower() in {"engineering", "technology", "sciences", "science", "studies"}
+                                or (any(b in degree.lower() for b in ["mechanical", "electrical", "civil", "chemical", "aerospace", "computer", "automobile"]) and "engineering" in next_l.lower())
+                            ) and not self.is_institution_string(next_l):
+                                degree = f"{degree} {next_l}".strip()
+                                break
+
+            if degree:
+                degree = re.sub(r":-\s*", " - ", degree).strip(" ,-–—")
+
             start_date, end_date, _, clean_dur = ResumeDateParser.parse_date_range(duration)
 
             if degree or institution:
-                items.append(
-                    EducationItem(
-                        degree=TextCleaner.clean_field(degree) or (
-                            TextCleaner.clean_field(lines[0]) if not institution else "Degree"
-                        ),
-                        institution=TextCleaner.clean_field(institution),
-                        duration=clean_dur or duration,
-                        start_date=start_date,
-                        end_date=end_date,
-                        details="; ".join(details_list) if details_list else None,
+                clean_deg = TextCleaner.clean_field(degree)
+                if clean_deg and self.is_invalid_degree_candidate(clean_deg):
+                    clean_deg = None
+
+                if clean_deg or institution:
+                    final_deg = clean_deg or (
+                        "Higher Secondary / Intermediate"
+                        if institution and any(w in institution.lower() for w in ["college", "junior", "school", "vidyalaya", "jnv"])
+                        else "Degree"
                     )
-                )
+                    items.append(
+                        EducationItem(
+                            degree=final_deg,
+                            institution=TextCleaner.clean_field(institution),
+                            duration=clean_dur or duration,
+                            start_date=start_date,
+                            end_date=end_date,
+                            details="; ".join(details_list) if details_list else None,
+                        )
+                    )
 
         if not items and full_text:
             lines = [l.strip() for l in full_text.splitlines() if l.strip()]
@@ -1116,7 +1271,123 @@ class EntityExtractor:
                             )
                         )
 
+        if full_text:
+            items = self._recover_misplaced_degrees(full_text, items)
+
         return items
+
+    def _recover_misplaced_degrees(
+        self,
+        full_text: str,
+        items: List[EducationItem],
+    ) -> List[EducationItem]:
+        if not full_text:
+            return items
+
+        existing_institutions = {
+            item.institution.lower()
+            for item in items
+            if item.institution
+        }
+        existing_degrees = {
+            item.degree.lower()
+            for item in items
+            if item.degree
+        }
+
+        # Match degree statements like: "Visvesvaraya National Institute of Technology, Nagpur - B. Tech MECHANICAL ENGINEERING, JULY 2013 - MAY 2017"
+        inst_deg_pattern = re.compile(
+            r"^([^\n\r]+?(?:Institute(?:\s+of\s+Technology)?|University|College|NIT|IIT|BITS|Polytechnic)[^\n\r]*?)\s*[-–—]\s*(B\.?\s*Tech|B\.?\s*E|M\.?\s*Tech|M\.?\s*S|M\.?\s*B\.?\s*A|Bachelor|Master|Diploma|B\.?\s*Sc|M\.?\s*Sc)\b([^\n\r,]*)(?:,\s*([^\n\r]+))?",
+            re.MULTILINE | re.IGNORECASE,
+        )
+
+        for match in inst_deg_pattern.finditer(full_text):
+            inst_raw = match.group(1).strip(" ,-–—")
+            deg_type = match.group(2).strip()
+            deg_spec = match.group(3).strip(" ,-–—")
+            trailing = match.group(4).strip() if match.group(4) else ""
+
+            full_degree = f"{deg_type} {deg_spec}".strip() if deg_spec else deg_type
+            inst_clean = TextCleaner.clean_field(inst_raw)
+
+            if not inst_clean or self.is_invalid_degree_candidate(full_degree):
+                continue
+
+            if any(inst_clean.lower() in exist for exist in existing_institutions) or any(full_degree.lower() in exist for exist in existing_degrees):
+                continue
+
+            dur_match = self.DATE_PATTERN.search(trailing) or GRADUATION_YEAR_PATTERN.search(trailing)
+            dur_str = dur_match.group(0) if dur_match else None
+            start_d, end_d, _, clean_dur = ResumeDateParser.parse_date_range(dur_str)
+
+            dets = []
+            cgpa_m = CGPA_PATTERN.search(trailing)
+            if cgpa_m:
+                dets.append(cgpa_m.group(0).strip())
+            if "first division" in trailing.lower():
+                dets.append("First Division")
+
+            items.insert(
+                0,
+                EducationItem(
+                    degree=TextCleaner.clean_field(full_degree),
+                    institution=inst_clean,
+                    duration=clean_dur or dur_str,
+                    start_date=start_d,
+                    end_date=end_d,
+                    details="; ".join(dets) if dets else None,
+                ),
+            )
+        # Deduplicate, filter, and merge education items
+        filtered_items: List[EducationItem] = []
+        for item in items:
+            deg_k = (item.degree or "").strip().lower()
+            inst_k = (item.institution or "").strip().lower()
+            if not deg_k:
+                continue
+            if self.is_invalid_degree_candidate(deg_k):
+                continue
+            if any(bad in deg_k for bad in [
+                "gap after", "preparation", "capture other", "recruiter comments",
+                "reasons for change", "msc-adams", "name of institute", "target institute",
+                "current location", "software/language", "proficiency", "summary sheet",
+                "recruitment questionnaire",
+            ]):
+                continue
+            if inst_k in ["name of institute", "target institute (y/n)", "target institute", "whether from target institute", "iso exams in school", "none"]:
+                item.institution = None
+                inst_k = ""
+
+            # Check if this degree merges into an existing entry
+            matching_idx = -1
+            for idx, existing in enumerate(filtered_items):
+                ex_deg = (existing.degree or "").strip().lower()
+                ex_inst = (existing.institution or "").strip().lower()
+                if deg_k == ex_deg or (deg_k in ex_deg and len(deg_k) >= 5) or (ex_deg in deg_k and len(ex_deg) >= 5):
+                    if not inst_k or not ex_inst or inst_k == ex_inst:
+                        matching_idx = idx
+                        break
+
+            if matching_idx != -1:
+                target = filtered_items[matching_idx]
+                if not target.institution and item.institution:
+                    target.institution = item.institution
+                if not target.duration and item.duration:
+                    target.duration = item.duration
+                if not target.start_date and item.start_date:
+                    target.start_date = item.start_date
+                if not target.end_date and item.end_date:
+                    target.end_date = item.end_date
+                if not target.details and item.details:
+                    target.details = item.details
+                elif target.details and item.details and item.details not in target.details:
+                    target.details = f"{target.details}; {item.details}"
+                if len(item.degree or "") > len(target.degree or ""):
+                    target.degree = item.degree
+            else:
+                filtered_items.append(item)
+
+        return filtered_items
 
     # ----------------------------------------
     # Role and Company Helper
@@ -1164,6 +1435,26 @@ class EntityExtractor:
 
         if not cleaned_lines:
             return []
+
+        # Stitch lines where a date range was split across adjacent lines (e.g. 'Jul 2022 - Sep' and '2024')
+        stitched_lines = []
+        skip_next = False
+        for i, l in enumerate(cleaned_lines):
+            if skip_next:
+                skip_next = False
+                continue
+            if i + 1 < len(cleaned_lines):
+                nxt = cleaned_lines[i + 1]
+                if re.search(r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember|t)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[a-z]*\.?\s*[-–—~to]*\s*$", l, re.IGNORECASE) and re.match(r"^(?:19|20)\d{2}\b", nxt):
+                    stitched_lines.append(f"{l} {nxt}".strip())
+                    skip_next = True
+                    continue
+                if re.search(r"[-–—~to]\s*$", l) and re.match(r"^(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember|t)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[a-z]*\.?\s*)?(?:19|20)\d{2}\b|present|current", nxt, re.IGNORECASE):
+                    stitched_lines.append(f"{l} {nxt}".strip())
+                    skip_next = True
+                    continue
+            stitched_lines.append(l)
+        cleaned_lines = stitched_lines
 
         date_line_indices = [
             idx for idx, line in enumerate(cleaned_lines)
@@ -1213,16 +1504,21 @@ class EntityExtractor:
             prev_date_index = date_line_indices[position - 1] if position > 0 else -1
 
             header_lines_before = []
+            abbrev_endings = ["ltd.", "inc.", "pvt.", "corp.", "co.", "engg.", "tech.", "sr.", "jr.", "dept.", "mgmt.", "asst.", "assoc.", "st.", "div."]
             for back_index in range(date_index - 1, prev_date_index, -1):
                 back_line = cleaned_lines[back_index]
 
                 if back_line.startswith(("-", "•", "*", "", "\uf0b7")) or len(back_line.split()) > 20:
                     break
 
+                has_role_kw = any(keyword in back_line.lower() for keyword in self.ROLE_KEYWORDS)
+                has_comp_kw = any(keyword in back_line.lower() for keyword in self.COMPANY_KEYWORDS)
+
                 if (
                     back_line.endswith(".")
                     and len(back_line.split()) >= 6
-                    and not any(keyword in back_line.lower() for keyword in ["ltd.", "inc.", "pvt.", "corp.", "co."])
+                    and not any(back_line.lower().endswith(abbr) for abbr in abbrev_endings)
+                    and not (has_role_kw or has_comp_kw)
                 ):
                     break
 
@@ -1250,38 +1546,78 @@ class EntityExtractor:
                     last_line = header_lines_before[-1]
                     role_cand, comp_cand, loc_cand = self._split_role_and_company(last_line)
 
-                    if role_cand and comp_cand:
+                    if role and not company:
+                        if comp_cand and not re.match(r"^\d+\s*(?:years?|yrs?|months?|m)$", comp_cand.strip(), re.IGNORECASE):
+                            company = comp_cand
+                        elif role_cand and not re.match(r"^\d+\s*(?:years?|yrs?|months?|m)$", role_cand.strip(), re.IGNORECASE):
+                            company = role_cand
+                        elif last_line and not re.match(r"^\d+\s*(?:years?|yrs?|months?|m)$", last_line.strip(), re.IGNORECASE):
+                            company = last_line
+                        if loc_cand and not location:
+                            location = loc_cand
+                    elif not role and company:
+                        if role_cand:
+                            role = role_cand
+                        if loc_cand and not location:
+                            location = loc_cand
+                    elif role_cand and comp_cand:
                         role = role_cand
                         company = comp_cand
                         if loc_cand and not location:
                             location = loc_cand
                     elif not role and not company:
                         if len(header_lines_before) == 1:
-                            role = role_cand or last_line
-                            company = comp_cand
+                            if role_cand and not comp_cand:
+                                role = role_cand
+                                company = None
+                            elif comp_cand and not role_cand:
+                                company = comp_cand
+                                role = None
+                            elif role_cand and comp_cand:
+                                role = role_cand
+                                company = comp_cand
+                            else:
+                                if any(keyword in last_line.lower() for keyword in self.ROLE_KEYWORDS):
+                                    role = last_line
+                                elif any(keyword in last_line.lower() for keyword in self.COMPANY_KEYWORDS):
+                                    company = last_line
+                                else:
+                                    role = last_line
                             if loc_cand and not location:
                                 location = loc_cand
                         elif len(header_lines_before) >= 2:
                             first_line = header_lines_before[0]
                             second_line = header_lines_before[1]
-                            _, comp1, _ = self._split_role_and_company(first_line)
-                            _, comp2, _ = self._split_role_and_company(second_line)
+                            role1, comp1, loc1 = self._split_role_and_company(first_line)
+                            role2, comp2, loc2 = self._split_role_and_company(second_line)
 
                             if (
                                 any(keyword in first_line.lower() for keyword in self.ROLE_KEYWORDS)
                                 and not any(keyword in second_line.lower() for keyword in self.ROLE_KEYWORDS)
                             ):
-                                role = first_line
+                                role = role1 or first_line
                                 company = comp2 if (comp2 and comp2.lower() != first_line.lower()) else second_line
+                                if (loc1 or loc2) and not location:
+                                    location = loc1 or loc2
                             elif (
                                 any(keyword in second_line.lower() for keyword in self.ROLE_KEYWORDS)
                                 and not any(keyword in first_line.lower() for keyword in self.ROLE_KEYWORDS)
                             ):
-                                role = second_line
+                                role = role2 or second_line
                                 company = comp1 if (comp1 and comp1.lower() != second_line.lower()) else first_line
+                                if (loc2 or loc1) and not location:
+                                    location = loc2 or loc1
                             else:
-                                company = first_line
-                                role = second_line
+                                company = comp1 or first_line
+                                role = role2 or second_line
+                                if (loc1 or loc2) and not location:
+                                    location = loc1 or loc2
+
+            if not role and header_lines_before:
+                for h_l in header_lines_before:
+                    if h_l != company and any(keyword in h_l.lower() for keyword in self.ROLE_KEYWORDS):
+                        role = h_l
+                        break
 
             if (not role or not company) and date_index + 1 < len(cleaned_lines):
                 next_line = cleaned_lines[date_index + 1]
@@ -1333,6 +1669,48 @@ class EntityExtractor:
 
             start_date, end_date, is_current, clean_duration = ResumeDateParser.parse_date_range(duration_str)
 
+            # Role and Company safety checks: prevent company in role
+            if company and company.lower().startswith("client:"):
+                company = re.sub(r"(?i)^client:\s*", "", company).strip(" ,-–—")
+
+            if company and re.match(r"^\d+\s*(?:years?|yrs?|months?|m)$", company.strip(), re.IGNORECASE):
+                company = None
+
+            def _tok_has_role(s: Optional[str]) -> bool:
+                if not s:
+                    return False
+                toks = set(re.findall(r"\b[A-Za-z0-9+#.-]+\b", s.lower()))
+                return any(kw in toks for kw in self.ROLE_KEYWORDS)
+
+            def _tok_has_comp(s: Optional[str]) -> bool:
+                if not s:
+                    return False
+                s_low = s.lower()
+                toks = set(re.findall(r"\b[A-Za-z0-9+#.-]+\b", s_low))
+                return any(kw in toks for kw in self.COMPANY_KEYWORDS) or any(w in s_low for w in ["pvt", "ltd", "inc", "corp", "technologies", "solutions", "industries", "engineering", "products", "services", "group", "holdings"])
+
+            role_has_comp = _tok_has_comp(role)
+            role_has_role = _tok_has_role(role)
+            comp_has_role = _tok_has_role(company)
+            comp_has_comp = _tok_has_comp(company)
+
+            if role_has_comp and not role_has_role:
+                if comp_has_role or not company:
+                    if not company:
+                        company = role
+                        role = None
+                    else:
+                        role, company = company, role
+            elif comp_has_role and not comp_has_comp and not role:
+                role = company
+                company = None
+
+            if not role and highlights:
+                for h_idx, h_line in enumerate(highlights[:2]):
+                    if _tok_has_role(h_line) and len(h_line.split()) <= 7:
+                        role = highlights.pop(h_idx)
+                        break
+
             items.append(
                 ExperienceItem(
                     role=TextCleaner.clean_field(role),
@@ -1364,9 +1742,22 @@ class EntityExtractor:
                 sub_exp_text = "\n".join(candidate_exp_lines)
                 sub_items = self.extract_experience(sub_exp_text, full_text=None)
                 if sub_items:
-                    return sub_items
+                    filtered_sub: List[ExperienceItem] = []
+                    for exp in sub_items:
+                        role_str = (exp.role or "").strip()
+                        if self.is_degree_string(role_str) or any(r.search(role_str) for r in self.DEGREE_REGEXES):
+                            continue
+                        filtered_sub.append(exp)
+                    return filtered_sub
 
-        return items
+        filtered_exp_items: List[ExperienceItem] = []
+        for exp in items:
+            role_str = (exp.role or "").strip()
+            if self.is_degree_string(role_str) or any(r.search(role_str) for r in self.DEGREE_REGEXES):
+                continue
+            filtered_exp_items.append(exp)
+
+        return filtered_exp_items
 
     # ----------------------------------------
     NAME_DISQUALIFIER_ROLES: Set[str] = {
@@ -1393,6 +1784,9 @@ class EntityExtractor:
         "job responsibilities", "responsibilities", "roles & responsibilities",
         "roles and responsibilities", "key responsibilities", "responsibilities held",
         "responsibilities held/ projects",
+        "recruitment questionnaire", "recruiter questionnaire", "questionnaire",
+        "summary sheet", "candidate questionnaire", "application details",
+        "recruitment details", "candidate details",
     }
 
     # Candidate Name Inference
@@ -1405,9 +1799,16 @@ class EntityExtractor:
     ) -> Optional[str]:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-        for raw_line in lines[:10]:
+        for raw_line in lines[:15]:
             clean_line = NAME_PREFIX_PATTERN.sub("", raw_line).strip()
             clean_line = clean_line.lstrip("•-*\uf0b7 \t")
+
+            # Check if this is a table row starting with Name | <Candidate Name>
+            m_tbl_name = re.match(r"^(?:candidate\s+name|name)\s*[:|]\s*([A-Za-z\s\.-]+?)(?:\s*[|:]|\n|$)", clean_line, re.IGNORECASE)
+            if m_tbl_name:
+                cand_n = m_tbl_name.group(1).strip()
+                if 2 <= len(cand_n.split()) <= 4 and not any(h in cand_n.lower() for h in self.NAME_DISQUALIFIER_HEADERS):
+                    clean_line = cand_n
 
             # Strip common honorific titles (Mr., Ms., Mrs., Dr., Er., Prof.)
             clean_line = re.sub(r"^(?:mr|ms|mrs|dr|er|prof)\.?\s+", "", clean_line, flags=re.IGNORECASE).strip()
@@ -1447,32 +1848,55 @@ class EntityExtractor:
                     continue
 
                 # Disqualify generic headers and labels
-                if any(hdr in name_lower for hdr in self.NAME_DISQUALIFIER_HEADERS):
+                if (
+                    any(hdr in name_lower for hdr in self.NAME_DISQUALIFIER_HEADERS)
+                    or any(d in name_lower for d in self.NAME_DISQUALIFIERS)
+                ):
                     continue
 
                 # Disqualify if any token is a role keyword (e.g. "Software Engineer", "Full Stack Developer")
-                if any(t in self.NAME_DISQUALIFIER_ROLES for t in tokens_lower):
+                if (
+                    any(t in self.NAME_DISQUALIFIER_ROLES for t in tokens_lower)
+                    or any(t in self.ROLE_KEYWORDS for t in tokens_lower)
+                ):
                     continue
 
                 # Disqualify if known locations
-                if any(loc in name_lower for loc in ["pune", "mumbai", "india", "delhi", "bangalore", "hyderabad", "chennai", "kolkata", "ahmedabad", "noida", "gurgaon", "indore"]):
+                if any(loc in name_lower for loc in self.KNOWN_LOCATIONS):
                     continue
 
-                # Disqualify tech buzzwords
-                if any(kw in tokens_lower for kw in [
-                    "agile", "scrum", "environment", "framework", "technologies",
-                    "technology", "solutions", "software", "hardware", "engineering",
-                    "development", "database", "python", "java", "autocad", "catia",
-                    "solidworks", "react", "fullstack", "frontend", "backend",
-                ]):
+                # Disqualify skills and tech buzzwords dynamically
+                if (
+                    any(kw in tokens_lower for kw in self.NON_SKILL_WORDS)
+                    or name_lower in {s.lower() for s in self.COMMON_SKILLS}
+                    or name_lower in SkillNormalizer.CANONICAL_SKILLS_MAP
+                ):
                     continue
+
+                # Split CamelCase/PascalCase if words were concatenated without spaces
+                cam_split = CAMEL_CASE_PATTERN.sub(r"\1 \2", name_candidate).strip()
+                if len(cam_split.split()) >= 2:
+                    return cam_split.title()
 
                 if len(words) == 1:
+                    fn_name = infer_candidate_name_from_file_path(file_path)
+                    if fn_name and len(fn_name.split()) >= 2:
+                        fn_compressed = fn_name.lower().replace(" ", "")
+                        cand_compressed = name_candidate.lower()
+                        if (
+                            fn_compressed == cand_compressed
+                            or cand_compressed in fn_compressed
+                            or fn_compressed in cand_compressed
+                        ):
+                            return fn_name
+
                     if (
                         len(name_candidate) >= 3
                         and name_candidate.replace(".", "").isalpha()
                         and (name_candidate.isupper() or name_candidate[0].isupper())
                     ):
+                        if fn_name and len(fn_name.split()) >= 2:
+                            return fn_name
                         return name_candidate.title()
                 else:
                     return name_candidate.title()
@@ -1517,7 +1941,11 @@ class EntityExtractor:
                 continue
             if any(hdr in l_lower for hdr in ["summary", "skills", "experience", "education", "curriculum", "resume", "biodata"]):
                 continue
+            if any(bad in l_lower for bad in self.NEGATIVE_ROLE_KEYWORDS):
+                continue
             if is_location(clean_l, self.KNOWN_LOCATIONS):
+                continue
+            if self.is_degree_string(clean_l) or any(r.search(clean_l) for r in self.DEGREE_REGEXES):
                 continue
 
             has_role_term = any(r_kw in l_lower.split() or r_kw in l_lower for r_kw in [
@@ -1539,6 +1967,8 @@ class EntityExtractor:
                 if r and len(str(r).strip()) >= 3:
                     clean_r = re.sub(r"\((?:[^\)]*(?:\d{4}|present|current|ltd|pvt|inc)[^\)]*)\)", "", str(r), flags=re.IGNORECASE).strip(" ,-–—")
                     if clean_r and len(clean_r) >= 3:
+                        if self.is_degree_string(clean_r) or any(reg.search(clean_r) for reg in self.DEGREE_REGEXES):
+                            continue
                         return TextCleaner.clean_field(clean_r).title()
 
         # 3. Check professional summary or career objective

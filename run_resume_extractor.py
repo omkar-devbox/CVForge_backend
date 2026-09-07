@@ -82,24 +82,28 @@ def main():
     )
 
     parser.add_argument(
+        "--use-nemotron",
         "--use-gemma",
-        dest="use_gemma",
+        dest="use_nemotron",
         action="store_true",
         default=True,
-        help="Use offline google/gemma-3-270m ONNX model for candidate extraction (default: True)",
+        help="Use nvidia/NVIDIA-Nemotron-Parse-v1.2 model for document parsing and candidate extraction (default: True)",
     )
     parser.add_argument(
+        "--no-nemotron",
         "--no-gemma",
         "--no-llm",
-        dest="no_gemma",
+        dest="no_nemotron",
         action="store_true",
-        help="Disable offline Gemma-3-270m model and use pure rule-based extractor",
+        help="Disable Nemotron model and use pure rule-based extractor",
     )
     parser.add_argument(
+        "--nemotron-model",
         "--gemma-model",
+        dest="nemotron_model",
         type=str,
-        default="/home/omkar/Documents/System Mech/gemma-3-270m-it-ONNX",
-        help="Path to local directory with google/gemma-3-270m ONNX model files",
+        default="/home/omkar/Documents/System Mech/NVIDIA-Nemotron-Parse-v1.2",
+        help="Path or HuggingFace ID for nvidia/NVIDIA-Nemotron-Parse-v1.2 model",
     )
     parser.add_argument(
         "--recursive",
@@ -117,14 +121,15 @@ def main():
     args = parser.parse_args()
     setup_logging(args.verbose)
 
-    enable_llm = False if args.no_gemma else args.use_gemma
+    enable_llm = False if args.no_nemotron else args.use_nemotron
 
     service = FileManifestService(
         config=settings,
         base_path=args.path,
         extracted_data_folder_name=args.output_folder,
         enable_llm=enable_llm,
-        gemma_model_dir=args.gemma_model,
+        nemotron_model_path=args.nemotron_model,
+        gemma_model_dir=args.nemotron_model,
         save_to_db=not args.no_db,
     )
 
@@ -164,9 +169,10 @@ def main():
         print(f"Saved JSON: {doc.json_output_path}\n")
         return
 
+    model_loc = getattr(args, "nemotron_model", "nvidia/NVIDIA-Nemotron-Parse-v1.2")
     llm_info = (
-        "google/gemma-3-270m (ONNX)"
-        if (service.enable_llm and Path(args.gemma_model).exists())
+        f"nvidia/NVIDIA-Nemotron-Parse-v1.2 ({model_loc})"
+        if service.enable_llm
         else "Disabled (Rule-based)"
     )
 

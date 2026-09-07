@@ -299,11 +299,12 @@ Pune University
         assert extracted.experience[0].start_date == "2020-01"
         assert extracted.experience[0].end_date == "2022-12"
 
-    def test_gemma_extractor_offline(self):
-        from app.services.file_manifest.ai_models import GemmaExtractor
-        gemma = GemmaExtractor()
-        assert gemma.is_available() is True
-        assert gemma._initialize() is True
+    def test_nemotron_extractor_availability(self):
+        from app.services.file_manifest.ai_models import NemotronParseExtractor, GemmaExtractor
+        parser = NemotronParseExtractor()
+        assert parser.is_available() is True
+        # Verify backwards-compatibility alias
+        assert GemmaExtractor is NemotronParseExtractor
 
     def test_infer_candidate_name_cleaning(self):
         extractor = EntityExtractor(enable_llm=False)
@@ -441,17 +442,19 @@ Pune University
         assert extracted.status == "success"
         assert extracted.name == "Abdul Razzaq"
 
-    def test_clear_session_retains_model_weights(self):
-        from app.services.file_manifest.ai_models import GemmaExtractor
+    def test_clear_session_and_cache_management(self):
+        from app.services.file_manifest.ai_models import NemotronParseExtractor
 
-        gemma = GemmaExtractor()
-        if gemma.is_available():
-            assert gemma._initialize() is True
-            assert gemma._session is not None
-            gemma.clear_session()
-            # Model weights and session must still remain active in memory
-            assert gemma._session is not None
-            assert gemma._is_initialized is True
+        parser = NemotronParseExtractor()
+        assert parser.is_available() is True
+        # Session clear should execute safely without error
+        parser.clear_session()
+        # Verify class/bbox extractor helper works reliably
+        test_output = "<x_10><y_20>John Doe<x_30><y_40><class_Title>"
+        parsed = parser.extract_classes_bboxes(test_output)
+        assert "Title" in parsed["classes"]
+        assert parsed["texts"] == ["John Doe"]
+        assert parsed["bboxes"] == [[10.0, 20.0, 30.0, 40.0]]
 
 
 

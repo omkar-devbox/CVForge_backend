@@ -21,6 +21,7 @@ from docx.text.paragraph import Paragraph
 
 from app.services.file_manifest.extractors.base import BaseDocumentExtractor
 from app.services.file_manifest.extractors.entity_extractor import EntityExtractor
+from app.services.file_manifest.extractors.helper import QUESTIONNAIRE_KEYWORDS
 from app.services.file_manifest.schemas import ExtractedDocument, ExtractedTable
 from app.services.file_manifest.text_processors import TextCleaner
 
@@ -33,21 +34,71 @@ logger = logging.getLogger("cvforge.extractor.word")
 class DocxExtractor(BaseDocumentExtractor):
     """Extracts text, paragraphs, tables, metadata, and entities from DOCX files."""
 
+    QUESTIONNAIRE_KEYWORDS = QUESTIONNAIRE_KEYWORDS
+
     def __init__(
         self,
+        enable_nemotron: Optional[bool] = None,
+        nemotron_model_path: Optional[Union[str, Path]] = None,
         enable_gemma: bool = True,
         enable_llm: Optional[bool] = None,
         gemma_model_dir: Optional[Union[str, Path]] = None,
         **kwargs: Any,
     ):
-        use_llm = enable_gemma if enable_llm is None else enable_llm
+        llm_flag = enable_nemotron if enable_nemotron is not None else enable_gemma
+        use_llm = enable_llm if llm_flag is None else (enable_llm if enable_llm is not None else llm_flag)
+        self.nemotron_model_path = nemotron_model_path or gemma_model_dir
         self.entity_extractor = EntityExtractor(
             enable_llm=use_llm,
-            gemma_model_dir=gemma_model_dir,
+            nemotron_model_path=self.nemotron_model_path,
+            gemma_model_dir=self.nemotron_model_path,
         )
 
     def supports_extension(self, extension: str) -> bool:
         return extension.lower() in {".docx"}
+
+    @staticmethod
+    def _extract_textbox_texts(element: Any, doc: Any) -> List[str]:
+        """Dynamically extracts text inside text boxes (w:txbxContent)."""
+        texts: List[str] = []
+        try:
+            txbx_elements = element.xpath(".//w:txbxContent")
+            for txbx in txbx_elements:
+                for p_elem in txbx.xpath(".//w:p"):
+                    p = Paragraph(p_elem, doc)
+                    txt = p.text.strip()
+                    if txt:
+                        texts.append(txt)
+        except Exception as exc:
+            logger.debug(f"Textbox extraction note: {exc}")
+        return texts
+
+    @staticmethod
+    def _extract_header_texts(doc: Any) -> List[str]:
+        """Dynamically extracts non-duplicate header text from document sections."""
+        header_texts: List[str] = []
+        seen = set()
+        try:
+            for section in getattr(doc, "sections", []):
+                header = getattr(section, "header", None)
+                if not header or getattr(header, "is_linked_to_previous", False):
+                    continue
+                for p in header.paragraphs:
+                    txt = p.text.strip()
+                    if txt and txt.lower() not in seen:
+                        seen.add(txt.lower())
+                        header_texts.append(txt)
+                for tbl in header.tables:
+                    for row in tbl.rows:
+                        row_cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                        if row_cells:
+                            line = " | ".join(row_cells)
+                            if line.lower() not in seen:
+                                seen.add(line.lower())
+                                header_texts.append(line)
+        except Exception as exc:
+            logger.debug(f"Header extraction note: {exc}")
+        return header_texts
 
     def extract(
         self, file_path: Path, images_output_dir: Optional[Path] = None
@@ -73,9 +124,14 @@ class DocxExtractor(BaseDocumentExtractor):
                 file_path, f"Failed to parse DOCX file: {exc}"
             )
 
-        # 1. Interleaved Body Extraction (Paragraphs & Tables in true document layout order)
+        # 1. Interleaved Body Extraction (Headers, Paragraphs, Text Boxes & Tables in natural order)
         ordered_text_blocks: List[str] = []
         extracted_tables: List[ExtractedTable] = []
+
+        # Include header blocks if present (often contains candidate name and contact info)
+        header_blocks = self._extract_header_texts(doc)
+        if header_blocks:
+            ordered_text_blocks.extend(header_blocks)
 
         for child in doc.element.body:
             if child.tag.endswith("p"):
@@ -83,6 +139,13 @@ class DocxExtractor(BaseDocumentExtractor):
                 text = p.text.strip()
                 if text:
                     ordered_text_blocks.append(text)
+
+                # Dynamically extract text from textboxes (w:txbxContent) inside or adjacent
+                tb_texts = self._extract_textbox_texts(child, doc)
+                for tb_t in tb_texts:
+                    if tb_t and tb_t not in ordered_text_blocks:
+                        ordered_text_blocks.append(tb_t)
+
             elif child.tag.endswith("tbl"):
                 table = Table(child, doc)
                 table_rows = []
@@ -95,10 +158,13 @@ class DocxExtractor(BaseDocumentExtractor):
                             cleaned_cells.append(c)
                             last_cell = c
                     if any(cleaned_cells):
+                        table_rows.append(cleaned_cells)
+
+                if table_rows:
+                    for cleaned_cells in table_rows:
                         row_line = " | ".join(filter(None, cleaned_cells))
                         ordered_text_blocks.append(row_line)
-                        table_rows.append(cleaned_cells)
-                if table_rows:
+
                     extracted_tables.append(ExtractedTable(rows=table_rows))
 
         # Fallback if body iteration produced nothing (e.g. non-standard XML)
@@ -182,19 +248,25 @@ class DocExtractor(BaseDocumentExtractor):
 
     def __init__(
         self,
+        enable_nemotron: Optional[bool] = None,
+        nemotron_model_path: Optional[Union[str, Path]] = None,
         enable_gemma: bool = True,
         enable_llm: Optional[bool] = None,
         gemma_model_dir: Optional[Union[str, Path]] = None,
         **kwargs: Any,
     ):
-        use_llm = enable_gemma if enable_llm is None else enable_llm
+        llm_flag = enable_nemotron if enable_nemotron is not None else enable_gemma
+        use_llm = enable_llm if llm_flag is None else (enable_llm if enable_llm is not None else llm_flag)
+        self.nemotron_model_path = nemotron_model_path or gemma_model_dir
         self.entity_extractor = EntityExtractor(
             enable_llm=use_llm,
-            gemma_model_dir=gemma_model_dir,
+            nemotron_model_path=self.nemotron_model_path,
+            gemma_model_dir=self.nemotron_model_path,
         )
         self.docx_extractor = DocxExtractor(
             enable_llm=use_llm,
-            gemma_model_dir=gemma_model_dir,
+            nemotron_model_path=self.nemotron_model_path,
+            gemma_model_dir=self.nemotron_model_path,
         )
 
     def supports_extension(self, extension: str) -> bool:

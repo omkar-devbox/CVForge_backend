@@ -10,7 +10,11 @@ import re
 from typing import Any, Dict, List, Optional, Union
 
 from app.core.config import AppConfigService, settings
-from app.services.file_manifest.ai_models import EmbeddingGemmaService, GemmaExtractor
+from app.services.file_manifest.ai_models import (
+    EmbeddingGemmaService,
+    GemmaExtractor,
+    NemotronParseExtractor,
+)
 from app.services.file_manifest.ats_scorer import ATSScorer
 from app.services.file_manifest.layout_extractor import LayoutExtractor
 from app.services.file_manifest.schemas import (
@@ -67,6 +71,7 @@ class FileManifestService:
         extracted_data_folder_name: Optional[str] = None,
         embedding_model_dir: Optional[Union[str, Path]] = None,
         enable_llm: Optional[bool] = None,
+        nemotron_model_path: Optional[Union[str, Path]] = None,
         gemma_model_dir: Optional[Union[str, Path]] = None,
         **kwargs: Any,
     ):
@@ -93,22 +98,30 @@ class FileManifestService:
         self.enable_llm = (
             enable_llm
             if enable_llm is not None
-            else getattr(self.config, "ENABLE_GEMMA_EXTRACTION", True)
+            else getattr(self.config, "ENABLE_NEMOTRON_PARSE", getattr(self.config, "ENABLE_GEMMA_EXTRACTION", True))
         )
-        self.gemma_model_dir = gemma_model_dir or getattr(self.config, "GEMMA_MODEL_PATH", None)
+        self.nemotron_model_path = (
+            nemotron_model_path
+            or gemma_model_dir
+            or getattr(self.config, "NEMOTRON_MODEL_PATH", getattr(self.config, "GEMMA_MODEL_PATH", "/home/omkar/Documents/System Mech/NVIDIA-Nemotron-Parse-v1.2"))
+        )
+        self.gemma_model_dir = self.nemotron_model_path
 
         # Map extensions to extractor instances
         self.extractors: Dict[str, BaseDocumentExtractor] = {
             ".pdf": PDFExtractor(
                 enable_llm=self.enable_llm,
+                nemotron_model_path=self.nemotron_model_path,
                 gemma_model_dir=self.gemma_model_dir,
             ),
             ".docx": DocxExtractor(
                 enable_llm=self.enable_llm,
+                nemotron_model_path=self.nemotron_model_path,
                 gemma_model_dir=self.gemma_model_dir,
             ),
             ".doc": DocExtractor(
                 enable_llm=self.enable_llm,
+                nemotron_model_path=self.nemotron_model_path,
                 gemma_model_dir=self.gemma_model_dir,
             ),
         }
@@ -119,13 +132,14 @@ class FileManifestService:
         # Initialize Layout & Coordinates Extractor
         self.layout_extractor = LayoutExtractor()
 
-        # Initialize Gemma Extractor instance for post-extraction refinement & formatting
-        self.gemma_extractor = None
+        # Initialize Nemotron Parse Extractor instance for document parsing & refinement
+        self.nemotron_parser = None
         if self.enable_llm:
             try:
-                self.gemma_extractor = GemmaExtractor(model_dir=self.gemma_model_dir)
+                self.nemotron_parser = NemotronParseExtractor(model_dir=self.nemotron_model_path)
             except Exception as e:
-                logger.warning(f"Could not initialize GemmaExtractor in service: {e}")
+                logger.warning(f"Could not initialize NemotronParseExtractor in service: {e}")
+        self.gemma_extractor = self.nemotron_parser
 
         # Database persistence
         self.save_to_db = kwargs.get("save_to_db", True)
@@ -214,18 +228,26 @@ class FileManifestService:
         return clean or "document"
 
     # //------------------------------------------------------------
-    # // Gemma Refinement & Post-Formatting
+    # // Nemotron Refinement & Post-Formatting
     # //------------------------------------------------------------
-    def refine_and_format_with_gemma(self, doc: ExtractedDocument) -> ExtractedDocument:
-        """Passes extracted document data through Gemma and formatting pipeline before saving:
+    def refine_and_format_with_nemotron(self, doc: ExtractedDocument) -> ExtractedDocument:
+        """Passes extracted document data through Nemotron and formatting pipeline before saving:
 
         1. Polishes and formats candidate name (title case, strips tags/dates).
-        2. Synthesizes/refines professional executive summary using Gemma if missing.
+        2. Synthesizes/refines professional executive summary using Nemotron if missing.
         3. Formats & polishes experience items (roles, companies, locations, clean highlights).
         4. Formats education items (degree, institution, GPA/CGPA details).
         5. Normalizes and deduplicates skills & tools with canonical mapping.
         6. Formats projects and languages cleanly.
         """
+        # 0. High-level LLM Document Refinement if active
+        active_parser = self.nemotron_parser or self.gemma_extractor
+        if active_parser and active_parser.is_available() and hasattr(active_parser, "refine_extracted_document"):
+            try:
+                doc = active_parser.refine_extracted_document(doc)
+            except Exception as ref_err:
+                logger.debug(f"Nemotron model document refinement: {ref_err}")
+
         # 1. Format candidate name
         if doc.name:
             c_name = TextCleaner.clean_field(doc.name)
@@ -241,7 +263,11 @@ class FileManifestService:
         # 1b. Format candidate role
         if getattr(doc, "role", None):
             c_role = TextCleaner.clean_field(doc.role)
-            c_role = re.sub(r"\((?:[^\)]*(?:\d{4}|present|current|ltd|pvt|inc)[^\)]*)\)", "", c_role, flags=re.IGNORECASE).strip(" ,-–—")
+            c_role = re.sub(r"\((?:[^\)]*(?:\d{4}|present|current|ltd|pvt|inc)[^\)]*)\)", "", c_role, flags=re.IGNORECASE)
+            c_role = re.sub(r"[\(\[\{][^\)\]\}]*$", "", c_role).strip(" ,-–—()[]{}")
+            comp_indicators = ["pvt", "ltd", "inc", "corp", "corporation", "technologies", "solutions", "industries", "holdings", "limited", "company", "steel", "motors"]
+            if any(w in c_role.lower() for w in comp_indicators) and not any(w in c_role.lower() for w in ["engineer", "developer", "manager", "lead", "architect", "analyst", "specialist", "executive", "officer", "trainee", "intern"]):
+                c_role = None
             if c_role and len(c_role) >= 3:
                 doc.role = c_role.title()
             else:
@@ -257,11 +283,12 @@ class FileManifestService:
             doc.entities.name = doc.name
             doc.entities.role = doc.role
 
-        # 2. Refine or generate summary section via Gemma with grounded factual fallback
-        if doc.summary and ("@" in doc.summary or any(k in doc.summary.lower() for k in ["pin code", "sector", "phone:", "email:", "details"])):
+        # 2. Refine or generate summary section via Nemotron with grounded factual fallback
+        if doc.summary and ("@" in doc.summary or "|" in doc.summary or any(k in doc.summary.lower() for k in ["pin code", "sector", "phone:", "email:", "details", "what is your", "notice period", "current ctc"])):
             doc.summary = None
 
-        if not doc.summary and self.gemma_extractor and self.gemma_extractor.is_available():
+        active_parser = self.nemotron_parser or self.gemma_extractor
+        if not doc.summary and active_parser and active_parser.is_available():
             snip_parts = [f"Name: {doc.name or doc.file_stem}"]
             if doc.skills:
                 snip_parts.append(f"Key Skills: {', '.join(doc.skills[:8])}")
@@ -271,16 +298,21 @@ class FileManifestService:
                 snip_parts.append(f"Major Project: {doc.projects[0].name}")
             summary_prompt_text = "\n".join(snip_parts)
             try:
-                gen_summary = self.gemma_extractor.generate_summary(summary_prompt_text)
+                gen_summary = active_parser.generate_summary(summary_prompt_text)
                 if gen_summary and len(gen_summary.strip()) >= 25:
                     doc.summary = gen_summary.strip()
             except Exception as e:
-                logger.debug(f"Gemma summary generation error: {e}")
+                logger.debug(f"Nemotron summary generation error: {e}")
 
         # Grounded factual summary if LLM was offline or summary remained empty
         if not doc.summary and (doc.skills or doc.experience or doc.projects):
-            exp_role = doc.experience[0].role if (doc.experience and doc.experience[0].role) else "Professional"
-            exp_comp = f" at {doc.experience[0].company}" if (doc.experience and doc.experience[0].company) else ""
+            exp_role = doc.role or (doc.experience[0].role if (doc.experience and doc.experience[0].role) else "Professional")
+            comp_name = doc.experience[0].company if (doc.experience and doc.experience[0].company) else None
+            exp_comp = ""
+            if comp_name:
+                from app.services.file_manifest.extractors.helper import KNOWN_LOCATIONS, is_location
+                if not is_location(comp_name, KNOWN_LOCATIONS):
+                    exp_comp = f" at {comp_name}"
             key_skills_str = ", ".join(doc.skills[:5]) if doc.skills else "industry-standard technologies"
             doc.summary = f"Results-driven {exp_role}{exp_comp} with strong expertise in {key_skills_str}."
 
@@ -289,17 +321,34 @@ class FileManifestService:
             if exp.role:
                 paren_match = re.match(r"^([^(]+?)\s*\((.*?)\)$", exp.role)
                 if paren_match:
-                    r_clean = paren_match.group(1).strip(" ,-–—")
-                    c_cand = paren_match.group(2).strip(" ,-–—")
-                    c_cand = re.sub(r"(?:from\s+)?\d{4}\s*(?:to|till|-|–)\s*(?:\d{4}|present|current|till date).*$", "", c_cand, flags=re.IGNORECASE).strip(" ,-–—")
+                    r_clean = paren_match.group(1).strip(" ,-–—()[]{}")
+                    c_cand = paren_match.group(2).strip(" ,-–—()[]{}")
+                    c_cand = re.sub(r"(?:from\s+)?\d{4}\s*(?:to|till|-|–)\s*(?:\d{4}|present|current|till date).*$", "", c_cand, flags=re.IGNORECASE).strip(" ,-–—()[]{}")
                     exp.role = TextCleaner.clean_field(r_clean)
                     if not exp.company and c_cand:
                         exp.company = TextCleaner.clean_field(c_cand)
                 else:
                     exp.role = TextCleaner.clean_field(exp.role)
 
+            if exp.role:
+                r_clean = re.sub(r"[\(\[\{][^\)\]\}]*$", "", exp.role).strip(" ,-–—()[]{}")
+                exp.role = r_clean.title() if r_clean.islower() else r_clean
+
             if exp.company:
                 exp.company = TextCleaner.clean_field(exp.company)
+
+            # Swap if role looks like company and company looks like role
+            comp_indicators = ["pvt", "ltd", "inc", "corp", "corporation", "technologies", "solutions", "industries", "holdings", "limited", "company"]
+            role_has_comp = bool(exp.role and any(w in exp.role.lower() for w in comp_indicators))
+            role_has_role = bool(exp.role and any(w in exp.role.lower() for w in ["engineer", "developer", "manager", "lead", "architect", "analyst", "specialist", "executive", "officer", "trainee", "intern"]))
+            comp_has_role = bool(exp.company and any(w in exp.company.lower() for w in ["engineer", "developer", "manager", "lead", "architect", "analyst", "specialist", "executive", "officer", "trainee", "intern"]))
+            if role_has_comp and not role_has_role:
+                if comp_has_role or not exp.company:
+                    if not exp.company:
+                        exp.company = exp.role
+                        exp.role = None
+                    else:
+                        exp.role, exp.company = exp.company, exp.role
 
             if exp.location:
                 exp.location = TextCleaner.clean_field(exp.location)
@@ -308,6 +357,10 @@ class FileManifestService:
                 clean_hl = []
                 for h in exp.highlights:
                     h_clean = TextCleaner.clean_field(h.lstrip("•-*\uf0b7 \t"))
+                    if h_clean:
+                        h_clean = re.sub(r"\\\(.*?\bullet.*?\\\)", "", h_clean).strip()
+                        h_clean = re.sub(r"^\*{1,3}|\*{1,3}$", "", h_clean).strip()
+                        h_clean = re.sub(r"^Key Achievement[s]?:?\s*", "", h_clean, flags=re.IGNORECASE).strip(" .-_*:")
                     if h_clean and len(h_clean) >= 5:
                         if not h_clean.endswith((".", "!", "?")):
                             h_clean += "."
@@ -317,11 +370,49 @@ class FileManifestService:
         # 4. Format Education items
         for edu in doc.education:
             if edu.degree:
-                edu.degree = TextCleaner.clean_field(edu.degree)
+                d_clean = TextCleaner.clean_field(edu.degree)
+                if d_clean:
+                    d_clean = re.sub(r"[\(\[\{][^\)\]\}]*$", "", d_clean).strip(" ,-–—()[]{}")
+                    edu.degree = d_clean.title() if d_clean.islower() else d_clean
             if edu.institution:
-                edu.institution = TextCleaner.clean_field(edu.institution)
+                i_clean = TextCleaner.clean_field(edu.institution)
+                if i_clean:
+                    i_clean = re.sub(r"[\(\[\{][^\)\]\}]*$", "", i_clean).strip(" ,-–—()[]{}")
+                    edu.institution = i_clean.title() if i_clean.islower() else i_clean
             if edu.details:
                 edu.details = TextCleaner.clean_field(edu.details)
+
+        # 4b. Format and segregate Certifications & Skills
+        cert_keywords = ["certified", "certification", "six sigma", "scrum master", "pmp", "itil", "prince2", "aws certified", "azure certified"]
+        if doc.skills:
+            remaining_skills = []
+            for s in doc.skills:
+                s_lower = s.lower()
+                if any(ck in s_lower for ck in cert_keywords):
+                    if s not in doc.certifications:
+                        doc.certifications.append(s)
+                else:
+                    remaining_skills.append(s)
+            doc.skills = remaining_skills
+
+        if doc.certifications:
+            clean_certs = []
+            for c in doc.certifications:
+                c_clean = TextCleaner.clean_field(c)
+                if not c_clean or len(c_clean) < 3:
+                    continue
+                c_lower = c_clean.lower()
+                # Exclude narrative achievements or sentences mistakenly identified as certifications
+                if any(v in c_lower for v in ["delivered", "owned complete", "defined vehicle", "achieved ₹", "achieved $", "built strong", "successfully integrated", "led full ownership"]):
+                    continue
+                if any(deg in c_lower for deg in ["b. tech", "b.tech", "m. tech", "m.tech", "b.e.", "bachelor", "master", "conferred b.", "degree with first", "electives such as", "institute of technology", "engineering,"]):
+                    continue
+                if re.search(r"\b(?:score|percentile|cgpa|gpa)\b", c_lower) and "%" in c_clean:
+                    continue
+                if re.search(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\s*[-–—to]+\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})", c_lower):
+                    continue
+                clean_certs.append(c_clean)
+            doc.certifications = clean_certs
 
         # 5. Format Projects items
         for proj in doc.projects:
@@ -340,19 +431,56 @@ class FileManifestService:
 
         # 7. Format Languages
         if doc.languages:
-            doc.languages = sorted(list(dict.fromkeys(l.title() for l in doc.languages if l)))
+            clean_langs = []
+            for l in doc.languages:
+                l_clean = TextCleaner.clean_field(l)
+                if not l_clean or len(l_clean) < 2:
+                    continue
+                if any(q in l_clean.lower() for q in ["ctc", "salary", "notice", "relocate", "experience", "what is", "reason"]):
+                    continue
+                if any(char.isdigit() for char in l_clean):
+                    continue
+                clean_langs.append(l_clean.title())
+            doc.languages = sorted(list(dict.fromkeys(clean_langs)))
+
+        # 7b. Populate recruitment metadata and overall profile classification
+        try:
+            from app.services.file_manifest.profile_classifier import ProfileClassifier
+            meta = ProfileClassifier.classify(doc)
+            if not doc.location:
+                doc.location = meta.get("location")
+            if not doc.total_experience:
+                doc.total_experience = meta.get("total_experience")
+            if not doc.notice_period:
+                doc.notice_period = meta.get("notice_period")
+            if not doc.current_ctc:
+                doc.current_ctc = meta.get("current_ctc")
+            if not doc.expected_ctc:
+                doc.expected_ctc = meta.get("expected_ctc")
+            if not doc.source:
+                doc.source = meta.get("source")
+            if not doc.overall_profile:
+                doc.overall_profile = meta.get("overall_profile")
+            if not doc.note:
+                doc.note = meta.get("note")
+        except Exception as meta_exc:
+            logger.debug(f"Could not extract recruitment metadata on doc: {meta_exc}")
 
         # 8. Clear LLM session context (keeping model weights in memory)
         if self.gemma_extractor:
             try:
-                self.gemma_extractor.clear_session()
+                if self.nemotron_parser:
+                    self.nemotron_parser.clear_session()
+                elif self.gemma_extractor:
+                    self.gemma_extractor.clear_session()
             except Exception as clear_err:
-                logger.debug(f"Error clearing Gemma session: {clear_err}")
+                logger.debug(f"Error clearing Nemotron session: {clear_err}")
 
         return doc
 
-    # Compatibility alias
-    refine_and_format_with_sw3 = refine_and_format_with_gemma
+    # Compatibility aliases
+    refine_and_format_with_gemma = refine_and_format_with_nemotron
+    refine_and_format_with_sw3 = refine_and_format_with_nemotron
 
     # //------------------------------------------------------------
     # // Single Document Processing & Feature Extraction
@@ -388,22 +516,22 @@ class FileManifestService:
         )
         safe_stem = self.sanitize_output_filename(path.stem)
         doc_images_dir = dest_dir / "images" / safe_stem
-        # 0. Ensure completely fresh SLM session per document (zero context leakage)
-        if self.gemma_extractor:
+        # 0. Ensure completely fresh parser session per document (zero context leakage)
+        if self.nemotron_parser:
             try:
-                self.gemma_extractor.clear_session()
+                self.nemotron_parser.clear_session()
             except Exception:
                 pass
-        if hasattr(extractor, "gemma_extractor") and extractor.gemma_extractor:
+        if hasattr(extractor, "nemotron_parser") and extractor.nemotron_parser:
             try:
-                extractor.gemma_extractor.clear_session()
+                extractor.nemotron_parser.clear_session()
             except Exception:
                 pass
         if hasattr(extractor, "entity_extractor"):
             ee = extractor.entity_extractor
-            if hasattr(ee, "gemma_extractor") and ee.gemma_extractor:
+            if hasattr(ee, "nemotron_parser") and ee.nemotron_parser:
                 try:
-                    ee.gemma_extractor.clear_session()
+                    ee.nemotron_parser.clear_session()
                 except Exception:
                     pass
 
@@ -411,19 +539,19 @@ class FileManifestService:
         logger.info(f"Extracting document data from: {path.name}")
         extracted_doc = extractor.extract(path, images_output_dir=doc_images_dir)
 
-        # 2. Pass Gemma & Formatting
-        logger.info(f"Passing extracted data to Gemma & Formatting pipeline: {path.name}")
-        extracted_doc = self.refine_and_format_with_gemma(extracted_doc)
+        # 2. Pass Nemotron & Formatting
+        logger.info(f"Passing extracted data to Nemotron & Formatting pipeline: {path.name}")
+        extracted_doc = self.refine_and_format_with_nemotron(extracted_doc)
 
-        # Clear session context, previous messages, and KV-cache while keeping model weights in memory
-        if hasattr(extractor, "gemma_extractor") and extractor.gemma_extractor:
+        # Clear session context while keeping model weights in memory
+        if hasattr(extractor, "nemotron_parser") and extractor.nemotron_parser:
             try:
-                extractor.gemma_extractor.clear_session()
+                extractor.nemotron_parser.clear_session()
             except Exception:
                 pass
         if hasattr(extractor, "entity_extractor"):
             ee = extractor.entity_extractor
-            if hasattr(ee, "gemma_extractor") and ee.gemma_extractor:
+            if hasattr(ee, "nemotron_parser") and ee.nemotron_parser:
                 try:
                     ee.gemma_extractor.clear_session()
                 except Exception:
@@ -469,6 +597,7 @@ class FileManifestService:
             # 5. Overall Profile composite text
             semantic_sections = [
                 f"Candidate Name: {extracted_doc.name or extracted_doc.file_stem}",
+                f"Target Role / Designation: {extracted_doc.role}" if getattr(extracted_doc, "role", None) else "",
                 f"Professional Summary:\n{extracted_doc.summary}" if extracted_doc.summary else "",
                 f"Skills & Technical Tools: {skills_composite}" if skills_composite else "",
                 f"Work Experience History:\n{exp_composite}" if exp_composite else "",

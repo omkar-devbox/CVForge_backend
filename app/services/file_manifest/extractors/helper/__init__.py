@@ -17,6 +17,9 @@ from app.services.file_manifest.extractors.helper.constants import (
     KNOWN_TOOLS,
     NON_SKILL_WORDS,
     PROJECT_FOOTER_KEYWORDS,
+    QUESTIONNAIRE_KEYWORDS,
+    NAME_DISQUALIFIERS,
+    NEGATIVE_ROLE_KEYWORDS,
     ROLE_KEYWORDS,
     VALID_SINGLE_LETTER_SKILLS,
 )
@@ -90,6 +93,7 @@ from app.services.file_manifest.extractors.helper.regex import (
 from app.services.file_manifest.extractors.helper.validators import (
     is_degree_string,
     is_institution_string,
+    is_invalid_degree_candidate,
     is_location,
     is_valid_skill,
 )
@@ -111,6 +115,9 @@ __all__ = [
     "COMMON_SKILLS",
     "NON_SKILL_WORDS",
     "PROJECT_FOOTER_KEYWORDS",
+    "QUESTIONNAIRE_KEYWORDS",
+    "NAME_DISQUALIFIERS",
+    "NEGATIVE_ROLE_KEYWORDS",
     "DEFAULT_SECTION_KEYWORDS",
     "HANGING_CONTINUATION_WORDS",
     "FIELD_CLEAN_STRIP_CHARS",
@@ -124,6 +131,7 @@ __all__ = [
     "KNOWN_TOOLS",
     "is_degree_string",
     "is_institution_string",
+    "is_invalid_degree_candidate",
     "is_location",
     "is_valid_skill",
     "build_candidate_links",

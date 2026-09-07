@@ -244,10 +244,16 @@ class TextCleaner:
 
     @classmethod
     def clean_field(cls, field_text: Optional[str]) -> Optional[str]:
-        """Sanitizes an individual field string (e.g., candidate name, title, role, company)."""
+        """Sanitizes an individual field string (e.g., candidate name, title, role, company, location)."""
         if not field_text or not isinstance(field_text, str):
             return None
         cleaned = field_text.strip(FIELD_CLEAN_STRIP_CHARS)
+        # Strip markdown headings and bold/italic asterisks/underscores
+        cleaned = re.sub(r"^[#\s]+", "", cleaned)
+        cleaned = re.sub(r"^\*{1,3}|\*{1,3}$", "", cleaned)
+        cleaned = re.sub(r"^_{1,3}|_{1,3}$", "", cleaned)
+        cleaned = re.sub(r"\\\(.*?\bullet.*?\\\)", "", cleaned)
+        cleaned = cleaned.strip(" \t\r\n#*_-–—:.")
         cleaned = HORIZONTAL_WHITESPACE_PATTERN.sub(" ", cleaned)
         return cleaned if cleaned else None
 
@@ -297,9 +303,23 @@ class ResumeDateParser:
             return None, None, False, None
 
         raw = duration_str.strip(" ()[]{}")
+        raw = GLUED_MONTH_YEAR_PATTERN.sub(r"\1 \2", raw)
+        # Normalize abbreviated year range e.g. '2020-22' -> '2020 - 2022' or "'20 - '22"
+        raw = re.sub(
+            r"\b((?:19|20)\d{2})\s*[-–—]\s*(\d{2})(?!\s*[/.-]\s*\d)\b",
+            lambda m: f"{m.group(1)} - {m.group(1)[:2]}{m.group(2)}",
+            raw,
+        )
+        raw = re.sub(
+            r"(?:^|[\s(\[])'(\d{2})\s*[-–—~]\s*'(\d{2})\b",
+            lambda m: f" 20{m.group(1)} - 20{m.group(2)}",
+            raw,
+        ).strip()
         is_current = bool(cls.CURRENT_KEYWORDS.search(raw))
 
         # 1. Match structured date range with compiled regex
+        start_date: Optional[str] = None
+        end_date: Optional[str] = None
         range_match = cls.DATE_RANGE_PATTERN.search(raw)
         if range_match:
             start_str = range_match.group(1).strip()
@@ -324,6 +344,19 @@ class ResumeDateParser:
 
             return start_date, end_date, is_current, clean_display
 
+        # Dynamic fallback: Split on range separators if regex didn't match
+        range_parts = re.split(r"\s*[-–—~]\s*|\s+(?:to|till|until)\s+", raw, maxsplit=1, flags=re.IGNORECASE)
+        if len(range_parts) == 2:
+            p1, p2 = range_parts[0].strip(), range_parts[1].strip()
+            s_cand = cls.parse_single_date(p1)
+            if s_cand:
+                if cls.CURRENT_KEYWORDS.search(p2):
+                    return s_cand, None, True, f"{s_cand} - Present"
+                e_cand = cls.parse_single_date(p2)
+                if e_cand:
+                    return s_cand, e_cand, False, f"{s_cand} - {e_cand}"
+                return s_cand, None, is_current, f"{s_cand} - {p2}"
+
         # 2. Check for directional start prefix like 'Since 2021' or 'From Jan 2020'
         if cls.START_PREFIXES.search(raw):
             clean_target = cls.START_PREFIXES.sub("", raw).strip()
@@ -338,9 +371,6 @@ class ResumeDateParser:
 
         # 4. Fallback for single date expressions
         parsed = cls.parse_single_date(raw)
-        start_date: Optional[str] = None
-        end_date: Optional[str] = None
-
         if parsed:
             if is_current:
                 start_date = parsed
@@ -398,7 +428,7 @@ class SkillNormalizer:
     @classmethod
     def normalize_single_skill(cls, skill: str) -> str:
         """Standardizes a single skill string using canonical dictionary lookup."""
-        clean = skill.strip()
+        clean = skill.strip(" ,.-—–|/:;•\t\n")
         if not clean:
             return ""
 

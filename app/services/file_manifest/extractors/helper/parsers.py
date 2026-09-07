@@ -108,7 +108,7 @@ def split_role_and_company(
                 None,
             )
 
-    # Delimiter ' at ' or ' @ '.
+    # Delimiter ' at ', ' @ ', or ' in ' (when followed by company).
     at_match = re.split(r"\s+(?:at|@)\s+", text, maxsplit=1, flags=re.IGNORECASE)
     if len(at_match) == 2:
         role_part, comp_part = at_match[0].strip(), at_match[1].strip()
@@ -124,6 +124,25 @@ def split_role_and_company(
             TextCleaner.clean_field(location_part),
         )
 
+    in_match = re.split(r"\s+in\s+", text, maxsplit=1, flags=re.IGNORECASE)
+    if len(in_match) == 2:
+        r_part, c_part = in_match[0].strip(), in_match[1].strip()
+        c_lower = c_part.lower()
+        if (
+            any(company in c_lower for company in company_keywords)
+            or any(sfx in c_lower for sfx in ["ltd", "pvt", "inc", "corp", "llc", "technologies", "industries", "limited", "steel", "motors", "group", "bank", "solutions"])
+        ):
+            loc_part = None
+            if "," in c_part:
+                tokens = c_part.split(",", 1)
+                c_part, loc_part = tokens[0].strip(), tokens[1].strip()
+
+            return (
+                TextCleaner.clean_field(r_part),
+                TextCleaner.clean_field(c_part),
+                TextCleaner.clean_field(loc_part),
+            )
+
     # Comma or Pipe delimiter with intelligent company token detection.
     if "," in text or "|" in text:
         delimiter = "|" if "|" in text else ","
@@ -131,16 +150,28 @@ def split_role_and_company(
 
         def is_company_token(token: str) -> bool:
             token_lower = token.lower()
-            has_company = any(company in token_lower for company in company_keywords)
-            has_role = any(role in token_lower for role in role_keywords)
+            token_words = set(re.findall(r"\b[a-z0-9]+\b", token_lower))
+            has_company = any(
+                (company in token_words if " " not in company else company in token_lower)
+                for company in company_keywords
+            )
+            has_role = any(
+                (role in token_words if " " not in role else bool(re.search(r"\b" + re.escape(role) + r"\b", token_lower)))
+                for role in role_keywords
+                if role not in ["engineering", "engineered"]
+            )
 
             if has_company and not has_role:
                 return True
 
             if any(
                 suffix in token_lower
-                for suffix in ["ltd", "pvt", "inc", "corp", "llc", "technologies", "industries"]
-            ):
+                for suffix in [
+                    "ltd", "pvt", "inc", "corp", "llc", "technologies", "technology",
+                    "industries", "services", "consultancy", "consulting", "engineering",
+                    "engineered", "solutions", "motors", "group", "ventures", "venture", "enterprises"
+                ]
+            ) and not has_role:
                 return True
 
             return False
@@ -162,21 +193,37 @@ def split_role_and_company(
             location_part = None
 
             for other_token in other_tokens:
-                if any(role in other_token.lower() for role in role_keywords):
+                cleaned_ot = re.sub(
+                    r"\b\d+\s*(?:years?|yrs?|months?|m)\b(?:\s*\d+\s*(?:months?|m))?",
+                    "",
+                    other_token,
+                    flags=re.IGNORECASE,
+                ).strip(" .\t,")
+                if not cleaned_ot:
+                    continue
+                ot_lower = cleaned_ot.lower()
+                ot_words = set(re.findall(r"\b[a-z0-9]+\b", ot_lower))
+                ot_has_role = any(
+                    (role in ot_words if " " not in role else bool(re.search(r"\b" + re.escape(role) + r"\b", ot_lower)))
+                    for role in role_keywords
+                    if role not in ["engineering", "engineered"]
+                )
+
+                if ot_has_role:
                     if not role_part:
-                        role_part = other_token
-                elif is_location(other_token, known_locations):
+                        role_part = cleaned_ot
+                elif is_location(cleaned_ot, known_locations):
                     if not location_part:
-                        location_part = other_token
+                        location_part = cleaned_ot
                 else:
-                    if not role_part:
-                        role_part = other_token
-                    elif not location_part:
-                        location_part = other_token
+                    if not location_part:
+                        location_part = cleaned_ot
+                    elif not role_part:
+                        role_part = cleaned_ot
 
             return (
-                TextCleaner.clean_field(role_part or comp_part),
-                TextCleaner.clean_field(comp_part if role_part else None),
+                TextCleaner.clean_field(role_part),
+                TextCleaner.clean_field(comp_part),
                 TextCleaner.clean_field(location_part),
             )
 
@@ -186,19 +233,35 @@ def split_role_and_company(
             non_locations = []
 
             for part in parts:
-                if is_location(part, known_locations) and not location_candidate:
-                    location_candidate = part
+                cleaned_p = re.sub(
+                    r"\b\d+\s*(?:years?|yrs?|months?|m)\b(?:\s*\d+\s*(?:months?|m))?",
+                    "",
+                    part,
+                    flags=re.IGNORECASE,
+                ).strip(" .\t,")
+                target_p = cleaned_p if cleaned_p else part
+                if is_location(target_p, known_locations) and not location_candidate:
+                    location_candidate = target_p
                 else:
-                    non_locations.append(part)
+                    non_locations.append(target_p)
+
+            def _token_has_role(tok: str) -> bool:
+                tok_lower = tok.lower()
+                tok_words = set(re.findall(r"\b[a-z0-9]+\b", tok_lower))
+                return any(
+                    (role in tok_words if " " not in role else bool(re.search(r"\b" + re.escape(role) + r"\b", tok_lower)))
+                    for role in role_keywords
+                    if role not in ["engineering", "engineered"]
+                )
 
             if len(non_locations) >= 2:
-                if any(role in non_locations[0].lower() for role in role_keywords):
+                if _token_has_role(non_locations[0]) and not _token_has_role(non_locations[1]):
                     return (
                         TextCleaner.clean_field(non_locations[0]),
                         TextCleaner.clean_field(non_locations[1]),
                         TextCleaner.clean_field(location_candidate),
                     )
-                if any(role in non_locations[1].lower() for role in role_keywords):
+                if _token_has_role(non_locations[1]) and not _token_has_role(non_locations[0]):
                     return (
                         TextCleaner.clean_field(non_locations[1]),
                         TextCleaner.clean_field(non_locations[0]),
@@ -210,7 +273,7 @@ def split_role_and_company(
                     TextCleaner.clean_field(location_candidate or non_locations[1]),
                 )
             elif len(non_locations) == 1:
-                if any(role in non_locations[0].lower() for role in role_keywords):
+                if _token_has_role(non_locations[0]):
                     return (
                         TextCleaner.clean_field(non_locations[0]),
                         None,

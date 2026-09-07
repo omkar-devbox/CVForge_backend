@@ -315,6 +315,44 @@ collection = {
                     },
                     "response": [],
                 },
+                {
+                    "name": "Soft Delete Candidate Document (Explicit)",
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/soft-delete",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "soft-delete",
+                            ],
+                        },
+                        "description": "Explicitly marks candidate document as soft-deleted without permanent data loss.",
+                    },
+                    "response": [],
+                },
+                {
+                    "name": "Restore Candidate Document",
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Accept", "value": "application/json"}],
+                        "url": {
+                            "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/restore",
+                            "host": ["{{baseUrl}}"],
+                            "path": [
+                                "{{apiPrefix}}",
+                                "candidates",
+                                "{{sampleDocumentId}}",
+                                "restore",
+                            ],
+                        },
+                        "description": "Restores a soft-deleted candidate document back to active state.",
+                    },
+                    "response": [],
+                },
             ],
         },
         {

@@ -38,7 +38,22 @@
     "technical skill",
     "management skills",
     "soft skills",
-    "technical & management skills"
+    "technical & management skills",
+    "keyskills",
+    "keyskill",
+    "key skill",
+    "core skills",
+    "area of excellence",
+    "areas of excellence",
+    "area of expertise",
+    "professional competencies",
+    "functional competencies",
+    "technical competencies",
+    "professional knowledge",
+    "software/language",
+    "software skills",
+    "software proficiency",
+    "technical knowledge"
   ],
   "experience": [
     "experience",
@@ -67,6 +82,9 @@
   "education": [
     "education",
     "academic background",
+    "academic profile",
+    "academic record",
+    "academic records",
     "academics",
     "qualifications",
     "academic qualifications",
@@ -92,13 +110,24 @@
     "certifications",
     "certificates",
     "licenses",
-    "courses",
+    "training",
+    "trainings",
     "achievements",
     "key career achievements",
     "awards",
     "awards & recognitions",
+    "awards/certificates",
+    "awards / certificates",
+    "awards and certificates",
+    "awards & certificates",
+    "certifications & trainings",
+    "licenses & certifications",
     "honors",
-    "honours"
+    "honours",
+    "honor awards",
+    "honors & awards",
+    "honors and awards",
+    "awards & honors"
   ],
   "publications": [
     "publications",
@@ -145,5 +174,13 @@
     "activities",
     "beyond professional interest",
     "beyond professional interests"
+  ],
+  "questionnaire": [
+    "recruitment questionnaire",
+    "recruitment details",
+    "questionnaire",
+    "recruiter questionnaire",
+    "application questionnaire",
+    "candidate questionnaire"
   ]
 }

@@ -41,17 +41,17 @@ GITHUB_PATTERN: Pattern = re.compile(
 # ----------------------------------------
 
 DATE_PATTERN: Pattern = re.compile(
-    r"(?:from\s+)?(?:(?:\b\d{1,2}[/-]\d{2,4}\b|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember|t)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[a-z]*\.?,?\s+\d{4}|\b(?:19|20)\d{2}\b))\s*(?:—|-|–|~|to|till|until)\s*(?:(?:\b\d{1,2}[/-]\d{2,4}\b|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember|t)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[a-z]*\.?,?\s+\d{4}|\b(?:19|20)\d{2}\b|Current|Present|Ongoing|Till Date|Till date))",
+    r"(?:from\s+)?(?:(?:\b\d{1,2}[/-]\d{2,4}\b|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember|t)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[a-z]*\.?,?\s*\d{4}|\b(?:19|20)\d{2}\b))\s*(?:—|-|–|~|to|till|until)\s*(?:(?:\b\d{1,2}[/-]\d{2,4}\b|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember|t)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[a-z]*\.?,?\s*\d{4}|\b(?:19|20)\d{2}\b|Current|Present|Ongoing|Till Date|Till date))",
     re.IGNORECASE,
 )
 
 GRADUATION_YEAR_PATTERN: Pattern = re.compile(
-    r"(?:Graduated:\s*)?(\b(?:19|20)\d{2}\b(?:\s*[-–—~to]\s*(?:\b(?:19|20)\d{2}\b|Present|Current))?)",
+    r"(?:Graduated:\s*)?(\b(?:19|20)\d{2}\b(?:\s*[-–—~to]\s*(?:\b(?:19|20)\d{2}\b|\b\d{2}\b|Present|Current))?)",
     re.IGNORECASE,
 )
 
 CGPA_PATTERN: Pattern = re.compile(
-    r"(\b[0-9.]+\s*(?:CGPA|GPA|Grade|%))|(?:(?:CGPA|GPA|Grade|Percentage|Marks)[\s:]*([0-9.]+(?:\s*/\s*[0-9.]+)?%?))|(\b[0-9]{1,2}(?:\.[0-9]{1,2})?\s*%)|(\b[0-9]\.[0-9]{1,2}\s*/\s*10(?:\.0)?)",
+    r"(\b[0-9.]+\s*(?:CGPA|GPA|Grade|%))|(?:(?:CGPA|GPA|Grade|Percentage|Marks)[\s:=–—\-]*([0-9.]+(?:\s*/\s*[0-9.]+)?%?))|(\b[0-9]{1,2}(?:\.[0-9]{1,2})?\s*%)|(\b[0-9]\.[0-9]{1,2}\s*/\s*10(?:\.0)?)",
     re.IGNORECASE,
 )
 
@@ -88,6 +88,8 @@ DEGREE_REGEXES: List[Pattern] = [
     re.compile(r"\bpgdm\b", re.IGNORECASE),
     re.compile(r"\bpgdbm\b", re.IGNORECASE),
     re.compile(r"\bpgd\b", re.IGNORECASE),
+    re.compile(r"\bclass\s+(?:xii|xi|x|12th|10th)\b", re.IGNORECASE),
+    re.compile(r"\bstandard\s+(?:xii|xi|x|12th|10th)\b", re.IGNORECASE),
     re.compile(r"\b10th\b", re.IGNORECASE),
     re.compile(r"\b12th\b", re.IGNORECASE),
     re.compile(r"\bhsc\b", re.IGNORECASE),
@@ -124,6 +126,7 @@ INSTITUTION_REGEXES: List[Pattern] = [
     re.compile(r"\bfaculty\s+of\b", re.IGNORECASE),
     re.compile(r"\bboard\s+of\b", re.IGNORECASE),
     re.compile(r"\bdepartment\s+of\b", re.IGNORECASE),
+    re.compile(r"\b(?:k\s*\.?\s*v\.?|kendriya\s+vidyalaya|jnv|dps|dav)\b", re.IGNORECASE),
     re.compile(r"\biit\b", re.IGNORECASE),
     re.compile(r"\bnit\b", re.IGNORECASE),
     re.compile(r"\bbits\b", re.IGNORECASE),
@@ -230,11 +233,15 @@ SMART_QUOTES_DASHES_PATTERNS = [
 ]
 
 STANDALONE_PAGE_PATTERN: Pattern = re.compile(
-    r"(?mi)^[ \t]*(?:[-–—\s]*page\s+\d+(?:\s*(?:of|/|-)\s*\d+)?[-–—\s]*|[-–—]\s*\d+\s*[-–—]|\b\d+\s*(?:of|/)\s*\d+\b)[ \t]*$\n?"
+    r"(?mi)^[ \t]*(?:[-–—\s]*page\s+\d{1,3}(?:\s*(?:of|/|-)\s*\d{1,3})?[-–—\s]*|[-–—]\s*\d{1,3}\s*[-–—]|\b\d{1,3}\s*(?:of|/)\s*\d{1,3}\b)[ \t]*$\n?"
 )
 
 TRAILING_PAGE_PATTERN: Pattern = re.compile(
-    r"(?mi)(?:[|•·\t][ \t]*|\s{2,})page\s+\d+(?:\s*(?:of|/)\s*\d+)?[ \t]*$"
+    r"(?mi)(?:[|•·\t][ \t]*|\s{2,})page\s+\d{1,3}(?:\s*(?:of|/)\s*\d{1,3})?[ \t]*$"
+)
+
+INVALID_DEGREE_PATTERN: Pattern = re.compile(
+    r"(?i)^(?:(?:\b(?:19|20)\d{2}\b\s*(?:—|-|–|~|to|till)\s*(?:\b(?:19|20)\d{2}\b|present|current))|(?:score|grade|marks|cgpa|gpa|percentage|percentile|air|rank)[\s:=–—\-]*[0-9.]+|[0-9.]+\s*%(?:\s*\(.*?\))?|(?:experienced\s+in|proficient\s+in|hands\s+on\s+with|ms\s+office|ms\s+project|autocad|python|siemens|catia)\b.*)$"
 )
 
 HYPHENATION_PATTERN: Pattern = re.compile(

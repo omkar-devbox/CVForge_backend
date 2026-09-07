@@ -156,17 +156,28 @@ class EnvironmentVariables(BaseSettings):
     )
 
     # -------------------------------------------------------------------------
-    # Offline Gemma-3 Local LLM Extraction Configuration
+    # NVIDIA-Nemotron-Parse-v1.2 Document Parsing Configuration
     # -------------------------------------------------------------------------
-    GEMMA_MODEL_PATH: str = Field(
-        default="/home/omkar/Documents/System Mech/gemma-3-270m-it-ONNX",
-        validation_alias=AliasChoices("GEMMA_MODEL_PATH", "gemma_model_path"),
-        description="Local directory containing offline Gemma-3-270m ONNX/PyTorch model",
+    NEMOTRON_MODEL_PATH: str = Field(
+        default="nvidia/NVIDIA-Nemotron-Parse-v1.2",
+        validation_alias=AliasChoices(
+            "NEMOTRON_MODEL_PATH",
+            "nemotron_model_path",
+            "GEMMA_MODEL_PATH",
+            "gemma_model_path",
+        ),
+        description="HuggingFace model ID or local directory for nvidia/NVIDIA-Nemotron-Parse-v1.2",
     )
-    ENABLE_GEMMA_EXTRACTION: bool = Field(
+    ENABLE_NEMOTRON_PARSE: bool = Field(
         default=True,
-        validation_alias=AliasChoices("ENABLE_GEMMA_EXTRACTION", "enable_gemma_extraction", "ENABLE_LLM_EXTRACTION"),
-        description="Enable offline Gemma-3-270m extraction when model directory exists",
+        validation_alias=AliasChoices(
+            "ENABLE_NEMOTRON_PARSE",
+            "enable_nemotron_parse",
+            "ENABLE_LLM_EXTRACTION",
+            "ENABLE_GEMMA_EXTRACTION",
+            "enable_gemma_extraction",
+        ),
+        description="Enable nvidia/NVIDIA-Nemotron-Parse-v1.2 document parsing",
     )
 
     # -------------------------------------------------------------------------

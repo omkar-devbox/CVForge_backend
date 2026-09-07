@@ -3,6 +3,7 @@
 from app.services.file_manifest.ai_models import (
     EmbeddingGemmaService,
     GemmaExtractor,
+    NemotronParseExtractor,
     OCRService,
 )
 from app.services.file_manifest.ats_scorer import ATSScoreBreakdown, ATSScorer
@@ -41,6 +42,7 @@ __all__ = [
     "FileManifestService",
     "LayoutExtractor",
     "EmbeddingGemmaService",
+    "NemotronParseExtractor",
     "GemmaExtractor",
     "OCRService",
     "ATSScorer",

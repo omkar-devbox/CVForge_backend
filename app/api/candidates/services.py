@@ -18,6 +18,8 @@ from app.api.candidates.schemas import (
     UpdateCandidateFieldResponse,
     EditCandidateProfileRequest,
     EditCandidateProfileResponse,
+    DeleteCandidateResponse,
+    RestoreCandidateResponse,
 )
 from app.core.config import AppConfigService, settings
 from app.core.exceptions import NotFoundException, ValidationException
@@ -53,6 +55,7 @@ class CandidateService:
         min_ats_score: Optional[float] = None,
         limit: int = 50,
         offset: int = 0,
+        include_deleted: bool = False,
     ) -> CandidateListResponse:
         """Retrieves paginated candidates matching filters with seamless DB and filesystem fallback."""
         items: List[CandidateSummary] = []
@@ -65,6 +68,7 @@ class CandidateService:
                 status=status,
                 limit=limit,
                 offset=offset,
+                include_deleted=include_deleted,
             )
             raw_items = db_result.get("items", [])
             total = db_result.get("total", 0)
@@ -187,6 +191,7 @@ class CandidateService:
             fs_items = self._load_filesystem_candidates(
                 overall_profile=overall_profile,
                 min_ats_score=min_ats_score,
+                include_deleted=include_deleted,
             )
             total = len(fs_items)
             items = fs_items[offset : offset + limit]
@@ -683,13 +688,84 @@ class CandidateService:
             message=f"Field '{field_name}' successfully updated.",
         )
 
-    def delete_candidate(self, document_id: int, soft_delete: bool = True) -> bool:
-        """Soft-deletes or hard-deletes a candidate document and extractions."""
-        doc = self.db_saver.get_document(document_id)
+    def soft_delete_candidate(self, document_id: int) -> DeleteCandidateResponse:
+        """Soft-deletes a candidate document and extractions."""
+        return self.delete_candidate(document_id=document_id, soft_delete=True)
+
+    def hard_delete_candidate(self, document_id: int) -> DeleteCandidateResponse:
+        """Permanently deletes a candidate document and extractions."""
+        return self.delete_candidate(document_id=document_id, soft_delete=False)
+
+    def restore_candidate(self, document_id: int) -> RestoreCandidateResponse:
+        """Restores a soft-deleted candidate document and extractions."""
+        doc = self.db_saver.get_document(document_id, include_deleted=True)
         if not doc:
             raise NotFoundException(resource="Candidate Document", identifier=str(document_id))
 
-        return self.db_saver.delete_document(document_id, soft_delete=soft_delete)
+        if not doc.get("is_deleted", False):
+            return RestoreCandidateResponse(
+                document_id=document_id,
+                restored=True,
+                message=f"Candidate document {document_id} is already active.",
+            )
+
+        success = self.db_saver.restore_document(document_id)
+        if not success:
+            raise ValidationException(message=f"Failed to restore candidate document {document_id}.")
+
+        # Synchronize filesystem copy if available
+        file_name = doc.get("file_name")
+        if file_name:
+            stem = Path(file_name).stem
+            dest_file = self.manifest_service.extracted_data_dir / f"{stem}.json"
+            if dest_file.exists():
+                try:
+                    data = json.loads(dest_file.read_text(encoding="utf-8"))
+                    if "is_deleted" in data:
+                        data["is_deleted"] = False
+                        dest_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                except Exception as exc:
+                    logger.warning(f"Could not restore filesystem JSON for candidate {stem}: {exc}")
+
+        return RestoreCandidateResponse(
+            document_id=document_id,
+            restored=True,
+            message=f"Candidate document {document_id} restored successfully.",
+        )
+
+    def delete_candidate(self, document_id: int, soft_delete: bool = True) -> DeleteCandidateResponse:
+        """Soft-deletes or hard-deletes a candidate document and extractions."""
+        doc = self.db_saver.get_document(document_id, include_deleted=False)
+        if not doc:
+            raise NotFoundException(resource="Candidate Document", identifier=str(document_id))
+
+        deleted = self.db_saver.delete_document(document_id, soft_delete=soft_delete)
+        if not deleted:
+            raise ValidationException(message=f"Failed to delete candidate document {document_id}.")
+
+        # Synchronize filesystem copy if available
+        file_name = doc.get("file_name")
+        if file_name:
+            stem = Path(file_name).stem
+            dest_file = self.manifest_service.extracted_data_dir / f"{stem}.json"
+            if dest_file.exists():
+                try:
+                    if soft_delete:
+                        data = json.loads(dest_file.read_text(encoding="utf-8"))
+                        data["is_deleted"] = True
+                        dest_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    else:
+                        dest_file.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning(f"Could not update filesystem JSON for deleted candidate {stem}: {exc}")
+
+        action_str = "soft-deleted" if soft_delete else "permanently deleted"
+        return DeleteCandidateResponse(
+            document_id=document_id,
+            deleted=True,
+            soft_delete=soft_delete,
+            message=f"Candidate document {document_id} {action_str} successfully.",
+        )
 
     # //------------------------------------------------------------
     # // Aggregate Statistics
@@ -734,6 +810,7 @@ class CandidateService:
         self,
         overall_profile: Optional[str] = None,
         min_ats_score: Optional[float] = None,
+        include_deleted: bool = False,
     ) -> List[CandidateSummary]:
         """Scans Extracted data folder for candidate JSON files."""
         dest_dir = self.manifest_service.extracted_data_dir
@@ -747,6 +824,9 @@ class CandidateService:
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+
+                if not include_deleted and data.get("is_deleted") is True:
+                    continue
 
                 ats_score = data.get("ats_score")
                 ats_val = (

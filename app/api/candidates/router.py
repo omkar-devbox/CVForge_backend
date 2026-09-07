@@ -16,6 +16,8 @@ from app.api.candidates.schemas import (
     UpdateCandidateFieldResponse,
     EditCandidateProfileRequest,
     EditCandidateProfileResponse,
+    DeleteCandidateResponse,
+    RestoreCandidateResponse,
 )
 from app.api.candidates.services import CandidateService
 from app.core.config import AppConfigService, get_config_service
@@ -59,6 +61,7 @@ def list_candidates(
     ),
     limit: int = Query(50, ge=1, le=200, description="Maximum candidate records to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
+    include_deleted: bool = Query(False, description="Whether to include soft-deleted candidates in the list"),
     service: CandidateService = Depends(get_candidate_service),
 ) -> StandardResponse[CandidateListResponse]:
     """Returns paginated candidates matching the specified filter criteria."""
@@ -69,6 +72,7 @@ def list_candidates(
         min_ats_score=min_ats_score,
         limit=limit,
         offset=offset,
+        include_deleted=include_deleted,
     )
     return standard_response(
         data=result,
@@ -326,7 +330,7 @@ def update_candidate_field(
 
 @router.delete(
     "/{document_id}",
-    response_model=StandardResponse[Dict[str, Any]],
+    response_model=StandardResponse[DeleteCandidateResponse],
     summary="Delete candidate document and extraction records",
 )
 def delete_candidate(
@@ -335,14 +339,50 @@ def delete_candidate(
         True, description="Whether to soft-delete (True) or permanently delete (False)"
     ),
     service: CandidateService = Depends(get_candidate_service),
-) -> StandardResponse[Dict[str, Any]]:
-    """Deletes the specified candidate document record."""
-    service.delete_candidate(document_id=document_id, soft_delete=soft_delete)
-    action_str = "soft-deleted" if soft_delete else "permanently deleted"
-    return standard_response(
-        data={"document_id": document_id, "deleted": True, "soft_delete": soft_delete},
-        message=f"Candidate document {document_id} {action_str} successfully.",
-    )
+) -> StandardResponse[DeleteCandidateResponse]:
+    """Deletes or soft-deletes the specified candidate document record."""
+    res = service.delete_candidate(document_id=document_id, soft_delete=soft_delete)
+    return standard_response(data=res, message=res.message)
+
+
+@router.post(
+    "/{document_id}/soft-delete",
+    response_model=StandardResponse[DeleteCandidateResponse],
+    summary="Soft delete a candidate document",
+)
+@router.delete(
+    "/{document_id}/soft-delete",
+    response_model=StandardResponse[DeleteCandidateResponse],
+    summary="Soft delete a candidate document (DELETE alias)",
+    include_in_schema=False,
+)
+def soft_delete_candidate(
+    document_id: int,
+    service: CandidateService = Depends(get_candidate_service),
+) -> StandardResponse[DeleteCandidateResponse]:
+    """Soft deletes a candidate document, marking records as deleted without permanent data loss."""
+    res = service.soft_delete_candidate(document_id=document_id)
+    return standard_response(data=res, message=res.message)
+
+
+@router.post(
+    "/{document_id}/restore",
+    response_model=StandardResponse[RestoreCandidateResponse],
+    summary="Restore a soft-deleted candidate document",
+)
+@router.put(
+    "/{document_id}/restore",
+    response_model=StandardResponse[RestoreCandidateResponse],
+    summary="Restore a soft-deleted candidate document (PUT alias)",
+    include_in_schema=False,
+)
+def restore_candidate(
+    document_id: int,
+    service: CandidateService = Depends(get_candidate_service),
+) -> StandardResponse[RestoreCandidateResponse]:
+    """Restores a soft-deleted candidate document back to active state."""
+    res = service.restore_candidate(document_id=document_id)
+    return standard_response(data=res, message=res.message)
 
 
 __all__ = ["router", "get_candidate_service"]

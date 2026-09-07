@@ -273,4 +273,101 @@ def test_download_candidate_resume(client, sample_candidate, candidate_service):
             test_file.unlink()
 
 
+def test_soft_delete_and_restore_candidate(client, sample_candidate):
+    """Test soft deleting a candidate, verifying exclusion, and restoring."""
+    doc_id = sample_candidate["document_id"]
+
+    # 1. Soft delete via dedicated endpoint
+    res_delete = client.post(f"/api/v1/candidates/{doc_id}/soft-delete")
+    assert res_delete.status_code == 200
+    del_data = res_delete.json()["data"]
+    assert del_data["document_id"] == doc_id
+    assert del_data["deleted"] is True
+    assert del_data["soft_delete"] is True
+
+    # 2. Verify candidate is now 404 on get
+    res_get = client.get(f"/api/v1/candidates/{doc_id}")
+    assert res_get.status_code == 404
+
+    # 3. Verify candidate excluded from default list
+    res_list = client.get("/api/v1/candidates?project_name=Candidates Test Project")
+    assert res_list.status_code == 200
+    active_ids = [it["document_id"] for it in res_list.json()["data"]["items"]]
+    assert doc_id not in active_ids
+
+    # 4. Verify candidate included when include_deleted=true
+    res_list_deleted = client.get(
+        "/api/v1/candidates?project_name=Candidates Test Project&include_deleted=true"
+    )
+    assert res_list_deleted.status_code == 200
+    all_ids = [it["document_id"] for it in res_list_deleted.json()["data"]["items"]]
+    assert doc_id in all_ids
+
+    # 5. Restore candidate
+    res_restore = client.post(f"/api/v1/candidates/{doc_id}/restore")
+    assert res_restore.status_code == 200
+    restore_data = res_restore.json()["data"]
+    assert restore_data["document_id"] == doc_id
+    assert restore_data["restored"] is True
+
+    # 6. Verify candidate accessible again
+    res_get_again = client.get(f"/api/v1/candidates/{doc_id}")
+    assert res_get_again.status_code == 200
+    assert res_get_again.json()["data"]["document_id"] == doc_id
+
+
+def test_delete_candidate_query_param(client, sample_candidate):
+    """Test DELETE /candidates/{id} with soft_delete query param."""
+    doc_id = sample_candidate["document_id"]
+
+    res_delete = client.delete(f"/api/v1/candidates/{doc_id}?soft_delete=true")
+    assert res_delete.status_code == 200
+    assert res_delete.json()["data"]["soft_delete"] is True
+
+    # Restore back for subsequent fixtures
+    res_restore = client.post(f"/api/v1/candidates/{doc_id}/restore")
+    assert res_restore.status_code == 200
+
+
+def test_hard_delete_candidate(client, candidate_service):
+    """Test permanently deleting a candidate record."""
+    from app.services.file_manifest.schemas import ExtractedDocument
+    temp_doc = ExtractedDocument(
+        file_name="temp_hard_delete.pdf",
+        file_stem="temp_hard_delete",
+        status="success",
+        name="Temporary Candidate",
+        email=["temp@example.com"],
+        contact_no=["+91 1122334455"],
+        skills=["Python"],
+    )
+    res = candidate_service.db_saver.save_extracted_document(
+        doc=temp_doc, project_name="Candidates Test Project"
+    )
+    temp_id = res["document_id"]
+
+    # Permanent hard delete
+    res_delete = client.delete(f"/api/v1/candidates/{temp_id}?soft_delete=false")
+    assert res_delete.status_code == 200
+    del_data = res_delete.json()["data"]
+    assert del_data["deleted"] is True
+    assert del_data["soft_delete"] is False
+
+    # Verify not found even with include_deleted
+    res_get = client.get(f"/api/v1/candidates/{temp_id}")
+    assert res_get.status_code == 404
+
+    # Restore fails with 404
+    res_restore = client.post(f"/api/v1/candidates/{temp_id}/restore")
+    assert res_restore.status_code == 404
+
+
+def test_delete_candidate_not_found(client):
+    """Test delete on non-existent candidate returns 404."""
+    res = client.delete("/api/v1/candidates/99999999")
+    assert res.status_code == 404
+    assert res.json()["success"] is False
+
+
+
 

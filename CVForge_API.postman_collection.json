@@ -351,40 +351,6 @@
           "response": []
         },
         {
-          "name": "Edit Candidate Profile (Contact & Recruitment Details)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Aakrati Agrawal ResumeKraftcom\",\n  \"email\": \"aakrati1506@gmail.com\",\n  \"contact_no\": \"7691957187\",\n  \"status\": \"Active\",\n  \"notice_period\": \"15 Days or less\",\n  \"current_ctc\": \"10.0 LPA\",\n  \"expected_ctc\": \"13.0 LPA\",\n  \"source\": \"ResumeKraft\",\n  \"note\": \"Interview scheduled for Monday\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/profile",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "{{apiPrefix}}",
-                "candidates",
-                "{{sampleDocumentId}}",
-                "profile"
-              ]
-            },
-            "description": "Updates candidate contact information, recruitment status, CTC, and remarks from the Edit Candidate Profile UI modal. Strictly restricted to the 9 editable fields: full_name, email, contact_no, status, notice_period, current_ctc, expected_ctc, source, note."
-          },
-          "response": []
-        },
-        {
           "name": "Update Candidate Field (Human Review / Correction)",
           "request": {
             "method": "PATCH",
@@ -447,6 +413,58 @@
               ]
             },
             "description": "Soft-deletes or permanently removes a candidate document and its extractions."
+          },
+          "response": []
+        },
+        {
+          "name": "Soft Delete Candidate Document (Explicit)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/soft-delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{apiPrefix}}",
+                "candidates",
+                "{{sampleDocumentId}}",
+                "soft-delete"
+              ]
+            },
+            "description": "Explicitly marks candidate document as soft-deleted without permanent data loss."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Candidate Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/candidates/{{sampleDocumentId}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{apiPrefix}}",
+                "candidates",
+                "{{sampleDocumentId}}",
+                "restore"
+              ]
+            },
+            "description": "Restores a soft-deleted candidate document back to active state."
           },
           "response": []
         }

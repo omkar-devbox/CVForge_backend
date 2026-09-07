@@ -113,11 +113,11 @@ python run_resume_extractor.py --path "/home/omkar/Documents/System Mech/Data fo
 # 4. RUN ALL FILES with custom output destination:
 python run_resume_extractor.py --path "/path/to/resumes" --output-folder "Extracted data" --recursive
 
-# 5. RUN ALL FILES with offline Gemma-3-270m LLM text analysis & fixing:
-python run_resume_extractor.py --recursive --use-gemma
+# 5. RUN ALL FILES with NVIDIA-Nemotron-Parse-v1.2 document parsing & candidate extraction:
+python run_resume_extractor.py --recursive --use-nemotron
 
-# 6. RUN ALL FILES in Ultra-Fast Mode (Pure rule-based, skips LLM for 10x faster batching):
-python run_resume_extractor.py --recursive --no-gemma
+# 6. RUN ALL FILES in Ultra-Fast Mode (Pure rule-based, skips model for 10x faster batching):
+python run_resume_extractor.py --recursive --no-nemotron
 
 # 7. RUN ALL FILES without computing vector embeddings:
 python run_resume_extractor.py --recursive --no-embedding
@@ -142,23 +142,23 @@ python run_resume_extractor.py --file "/home/omkar/Documents/System Mech/Data fo
 python run_resume_extractor.py --file "/home/omkar/Documents/System Mech/Data for AI/resumes/Goraksha Adhane.doc"
 ```
 
-#### Gemma-3-270m LLM Usage
+#### NVIDIA-Nemotron-Parse-v1.2 Usage
 
-The extractor uses **`google/gemma-3-270m`** locally via ONNX Runtime:
-- **Location**: `/home/omkar/Documents/System Mech/gemma-3-270m-it-ONNX`
-- **Models Included**: `onnx/model_q4.onnx` (~308MB) and `onnx/model_quantized.onnx` (~520MB).
-- **Zero Cloud Calls**: 100% private, offline inference with zero OpenAI API calls or keys required.
+The extractor uses **`nvidia/NVIDIA-Nemotron-Parse-v1.2`** for vision-language document parsing and candidate extraction:
+- **Location**: `/home/omkar/Documents/System Mech/NVIDIA-Nemotron-Parse-v1.2` (or HuggingFace Hub `nvidia/NVIDIA-Nemotron-Parse-v1.2`)
+- **Features**: Visual layout detection, normalized bounding boxes (`<predict_bbox>`), semantic classes (`<predict_classes>`), reading-order Markdown (`<output_markdown>`).
+- **Zero Cloud Calls**: Runs locally on CUDA or CPU with zero OpenAI API calls or keys required.
 - **Auto-Fallback**: If the model is not found or inference fails on a corrupted document, the system automatically falls back to the high-precision regex section engine.
 
 ```bash
-# Explicitly enable Gemma LLM:
-python run_resume_extractor.py --use-gemma
+# Explicitly enable Nemotron model:
+python run_resume_extractor.py --use-nemotron
 
-# Use custom Gemma model location:
-python run_resume_extractor.py --gemma-model "/path/to/custom/gemma-3-270m"
+# Use custom model location:
+python run_resume_extractor.py --nemotron-model "/path/to/custom/NVIDIA-Nemotron-Parse-v1.2"
 
-# Disable Gemma LLM (pure rule-based):
-python run_resume_extractor.py --no-gemma
+# Disable model (pure rule-based):
+python run_resume_extractor.py --no-nemotron
 ```
 
 #### CLI Options Reference
@@ -167,9 +167,9 @@ python run_resume_extractor.py --no-gemma
 | `--path` | `-p` | `Data for AI/resumes` | Directory path containing resumes to process |
 | `--file` | `-f` | `None` | Process a single file instead of full directory |
 | `--output-folder` | `-o` | `Extracted data` | Subfolder name for generated JSON and images |
-| `--use-gemma` | | `True` | Use offline Gemma-3-270m ONNX model for extraction |
-| `--no-gemma` | `--no-llm` | `False` | Disable offline Gemma-3-270m model (use rule-based parser) |
-| `--gemma-model` | | `.../gemma-3-270m-it-ONNX` | Path to offline Gemma-3-270m model directory |
+| `--use-nemotron` | `--use-gemma` | `True` | Use nvidia/NVIDIA-Nemotron-Parse-v1.2 for parsing |
+| `--no-nemotron` | `--no-llm` | `False` | Disable Nemotron model (use pure rule-based parser) |
+| `--nemotron-model` | `--gemma-model` | `.../NVIDIA-Nemotron-Parse-v1.2` | Path or HuggingFace ID for model |
 | `--no-embedding` | | `False` | Disable vector embedding computation |
 | `--recursive` | `-r` | `False` | Scan directory recursively for resumes |
 | `--verbose` | `-v` | `False` | Enable verbose debug logs |
@@ -182,7 +182,7 @@ python run_resume_extractor.py --no-gemma
 - **Legacy Word (`.doc`)**: Headless LibreOffice (`soffice`) `.doc` $\rightarrow$ `.docx` auto-conversion.
 - **HTML / Markdown Cleanup**: `BeautifulSoup` & regex noise, entity, and tag stripping.
 - **Section Detection**: Regex + custom parser for Summary, Experience, Education, Skills.
-- **Local Offline LLM**: `google/gemma-3-270m` ONNX model (100% offline, zero cloud API).
+- **Vision-Language Document Parser**: `nvidia/NVIDIA-Nemotron-Parse-v1.2` document model.
 - **Skill Normalization**: `RapidFuzz` deduplication and canonical variant mapping.
 - **Date Parsing**: `dateparser` normalization of duration strings to ISO start/end dates.
 - **Embeddings**: `embeddinggemma-onnx-embeddinggemma-300m-v1` (768-dimensional vectors).
